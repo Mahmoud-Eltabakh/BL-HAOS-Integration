@@ -89,7 +89,11 @@ class BLHAOSClient:
         return self.speakers.get(address)
 
     def _async_process_speaker(self, speaker: Any) -> None:
-        if not isinstance(speaker, dict) or not speaker.get("trusted") or not speaker.get("is_audio_sink"):
+        if not isinstance(speaker, dict):
+            return
+        is_audio = speaker.get("is_audio_sink", True)
+        is_valid_sink = bool(speaker.get("trusted") or speaker.get("paired") or speaker.get("connected") or speaker.get("available"))
+        if not (is_audio and is_valid_sink):
             return
         address = normalize_address(str(speaker.get("address", "")))
         if address is None:

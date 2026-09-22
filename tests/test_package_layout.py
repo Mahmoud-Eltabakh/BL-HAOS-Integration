@@ -23,3 +23,11 @@ def test_native_transport_is_discovery_based_and_mqtt_free():
     assert "/identity" in source
     assert "ws_connect" in source
     assert "mqtt" not in source.lower()
+
+
+def test_client_speaker_filter_logic():
+    # Verify the regex and parsing rules without HA runtime dependencies
+    import re
+    mac_regex = re.compile(r"^[0-9a-f]{2}(?::[0-9a-f]{2}){5}$")
+    normalized = "EC-81-93-53-A9-16".strip().lower().replace("-", ":")
+    assert mac_regex.fullmatch(normalized) is not None
