@@ -26,10 +26,9 @@ def normalize_address(address: str) -> str | None:
 class BLHAOSClient:
     """Maintain the cached state of trusted BL-HAOS speakers."""
 
-    def __init__(self, hass: HomeAssistant, endpoint: str, bridge_token: str) -> None:
+    def __init__(self, hass: HomeAssistant, endpoint: str) -> None:
         self.hass = hass
         self.endpoint = endpoint.rstrip("/")
-        self._bridge_token = bridge_token
         self.speakers: dict[str, dict[str, Any]] = {}
         self._update_listeners: set[Callable[[str], None]] = set()
         self._websocket_task: asyncio.Task[None] | None = None
@@ -38,7 +37,7 @@ class BLHAOSClient:
 
     @property
     def _headers(self) -> dict[str, str]:
-        return {"Authorization": f"Bearer {self._bridge_token}"}
+        return {}
 
     async def async_initialize(self) -> None:
         """Validate identity, cache the snapshot, and start event updates."""

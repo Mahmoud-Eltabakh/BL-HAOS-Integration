@@ -9,7 +9,7 @@ from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.core import HomeAssistant
 
 from .client import BLHAOSClient
-from .const import CONF_BRIDGE_TOKEN, CONF_ENDPOINT, DOMAIN, PLATFORMS
+from .const import CONF_ENDPOINT, DOMAIN, PLATFORMS
 
 
 @dataclass
@@ -21,7 +21,7 @@ class BLHAOSRuntime:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up BL-HAOS from a config entry."""
-    client = BLHAOSClient(hass, entry.data[CONF_ENDPOINT], entry.data[CONF_BRIDGE_TOKEN])
+    client = BLHAOSClient(hass, entry.data[CONF_ENDPOINT])
     try:
         await client.async_initialize()
     except Exception as error:

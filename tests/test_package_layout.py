@@ -16,9 +16,10 @@ def test_hacs_component_layout_and_manifest():
     assert manifest["config_flow"] is True
 
 
-def test_native_transport_is_token_authenticated_and_mqtt_free():
+def test_native_transport_is_discovery_based_and_mqtt_free():
     source = "\n".join(path.read_text(encoding="utf-8") for path in COMPONENT.glob("*.py"))
-    assert "CONF_BRIDGE_TOKEN" in source
+    assert "async_step_hassio" in source
+    assert "_endpoint_from_hassio_slug" in source
     assert "/identity" in source
     assert "ws_connect" in source
     assert "mqtt" not in source.lower()

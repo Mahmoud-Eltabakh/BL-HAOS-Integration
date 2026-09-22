@@ -8,7 +8,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.redact import async_redact_data
 
-from .const import CONF_BRIDGE_TOKEN, CONF_ENDPOINT
+from .const import CONF_ENDPOINT
 
 
 async def async_get_config_entry_diagnostics(
@@ -21,7 +21,6 @@ async def async_get_config_entry_diagnostics(
         "entry": {
             "entry_id": entry.entry_id,
             "endpoint_configured": bool(entry.data.get(CONF_ENDPOINT)),
-            "bridge_token_configured": bool(entry.data.get(CONF_BRIDGE_TOKEN)),
         },
         "transport": {
             "available": client.transport_available,

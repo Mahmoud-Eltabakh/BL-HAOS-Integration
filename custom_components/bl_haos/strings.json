@@ -5,9 +5,12 @@
       "user": {
         "title": "BL-HAOS Bluetooth Audio",
         "data": {
-          "endpoint": "BL-HAOS add-on HTTP endpoint",
-          "bridge_token": "Bridge token from the BL-HAOS add-on configuration"
+          "endpoint": "BL-HAOS add-on HTTP endpoint"
         }
+      },
+      "hassio_confirm": {
+        "title": "BL-HAOS Bluetooth Audio",
+        "description": "Set up the discovered BL-HAOS add-on."
       }
     },
     "error": {
