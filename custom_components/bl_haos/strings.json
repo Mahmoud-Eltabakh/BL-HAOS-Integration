@@ -4,8 +4,9 @@
     "step": {
       "user": {
         "title": "BL-HAOS Bluetooth Audio",
+        "description": "Enter the BL-HAOS add-on endpoint (e.g. http://c839f4a9-bl-haos:8099 or http://localhost:8099).",
         "data": {
-          "endpoint": "BL-HAOS add-on HTTP endpoint"
+          "endpoint": "Endpoint URL"
         }
       },
       "hassio_confirm": {
@@ -14,7 +15,7 @@
       }
     },
     "error": {
-      "cannot_connect": "Unable to authenticate with the BL-HAOS add-on."
+      "cannot_connect": "Unable to connect or authenticate with the BL-HAOS add-on."
     },
     "abort": {
       "already_configured": "BL-HAOS Bluetooth Audio is already configured."

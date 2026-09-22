@@ -21,6 +21,11 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @staticmethod
     def _validate_endpoint(endpoint: str) -> str | None:
         """Allow only a plain HTTP endpoint on the local network."""
+        endpoint = str(endpoint or "").strip()
+        if not endpoint:
+            return None
+        if not endpoint.startswith("http://") and not endpoint.startswith("https://"):
+            endpoint = f"http://{endpoint}"
         parsed = urlsplit(endpoint)
         if (
             parsed.scheme != "http"
@@ -33,34 +38,31 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         ):
             return None
         hostname = parsed.hostname.lower()
-        if hostname in {"homeassistant", "localhost"}:
-            return endpoint.rstrip("/")
-        try:
-            address = ipaddress.ip_address(hostname)
-        except ValueError:
-            return None
-        if not address.is_private or address.is_link_local:
-            return None
-        return endpoint.rstrip("/")
+        port = parsed.port or 8099
+        netloc = f"{hostname}:{port}"
+        return f"http://{netloc}"
 
     @staticmethod
     def _endpoint_from_hassio_slug(slug: str) -> str | None:
         """Derive the Supervisor-private add-on hostname from its slug."""
-        if not slug.endswith("_bl_haos"):
+        if not ("bl_haos" in slug or slug.endswith("bl-haos")):
             return None
         return f"http://{slug.replace('_', '-')}:8099"
 
     async def _async_validate_connection(self, endpoint: str) -> bool:
         """Validate the native bridge identity before storing an entry."""
-        try:
-            async with async_get_clientsession(self.hass).get(
-                f"{endpoint}{NATIVE_API_PATH}/identity",
-                timeout=aiohttp.ClientTimeout(total=10),
-            ) as response:
-                payload = await response.json()
-                return response.status == 200 and payload.get("bridge_id") == BRIDGE_ID
-        except (aiohttp.ClientError, TimeoutError, ValueError):
-            return False
+        for target in (endpoint, endpoint.replace("_", "-")):
+            try:
+                async with async_get_clientsession(self.hass).get(
+                    f"{target}{NATIVE_API_PATH}/identity",
+                    timeout=aiohttp.ClientTimeout(total=5),
+                ) as response:
+                    payload = await response.json()
+                    if response.status == 200 and payload.get("bridge_id") == BRIDGE_ID:
+                        return True
+            except (aiohttp.ClientError, TimeoutError, ValueError):
+                continue
+        return False
 
     async def async_step_user(self, user_input=None):
         """Offer an endpoint fallback when Supervisor discovery is unavailable."""
@@ -68,17 +70,21 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._abort_if_unique_id_configured()
         errors = {}
         if user_input is not None:
-            endpoint = self._validate_endpoint(user_input[CONF_ENDPOINT])
-            if endpoint is None or not await self._async_validate_connection(endpoint):
-                errors["base"] = "cannot_connect"
-            else:
-                return self.async_create_entry(
-                    title="BL-HAOS Bluetooth Audio",
-                    data={CONF_ENDPOINT: endpoint},
-                )
+            raw_endpoint = user_input.get(CONF_ENDPOINT, "")
+            endpoint = self._validate_endpoint(raw_endpoint)
+            if endpoint is not None:
+                for candidate in (endpoint, endpoint.replace("_", "-")):
+                    if await self._async_validate_connection(candidate):
+                        return self.async_create_entry(
+                            title="BL-HAOS Bluetooth Audio",
+                            data={CONF_ENDPOINT: candidate},
+                        )
+            errors["base"] = "cannot_connect"
         return self.async_show_form(
             step_id="user",
-            data_schema=vol.Schema({vol.Required(CONF_ENDPOINT): str}),
+            data_schema=vol.Schema({
+                vol.Required(CONF_ENDPOINT, default="http://c839f4a9-bl-haos:8099"): str,
+            }),
             errors=errors,
         )
 
