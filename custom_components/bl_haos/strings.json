@@ -1,0 +1,20 @@
+{
+  "title": "BL-HAOS Bluetooth Audio",
+  "config": {
+    "step": {
+      "user": {
+        "title": "BL-HAOS Bluetooth Audio",
+        "data": {
+          "endpoint": "BL-HAOS add-on HTTP endpoint",
+          "bridge_token": "Bridge token from the BL-HAOS add-on configuration"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Unable to authenticate with the BL-HAOS add-on."
+    },
+    "abort": {
+      "already_configured": "BL-HAOS Bluetooth Audio is already configured."
+    }
+  }
+}
