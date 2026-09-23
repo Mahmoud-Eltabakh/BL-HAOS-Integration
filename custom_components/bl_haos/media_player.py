@@ -104,7 +104,6 @@ class BLHAOSMediaPlayer(MediaPlayerEntity):
             name=self.name,
             manufacturer="BL-HAOS",
             model="Bluetooth Speaker",
-            via_device=(DOMAIN, self._speaker.get("adapter", "adapter")),
         )
 
     @property
