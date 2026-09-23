@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from homeassistant.components.media_player import (
     MediaPlayerDeviceClass,
     MediaPlayerEntity,
     MediaPlayerEntityFeature,
+    async_process_play_media_url,
 )
-from homeassistant.components.media_source import async_resolve_media, is_media_source_id
-from homeassistant.components.media_player import async_process_play_media_url
+from homeassistant.components.media_source import (
+    async_resolve_media,
+    is_media_source_id,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
-from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .client import BLHAOSClient, normalize_address
 from .const import DOMAIN
@@ -21,7 +25,7 @@ from .const import DOMAIN
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
-    async_add_entities: AddConfigEntryEntitiesCallback,
+    async_add_entities: Callable,
 ) -> None:
     """Set up cached BL-HAOS speakers and subscribe for native updates."""
     client: BLHAOSClient = entry.runtime_data.client
@@ -37,6 +41,11 @@ async def async_setup_entry(
 
     @callback
     def async_discover_speaker(address: str) -> None:
+        if address not in client.speakers:
+            entity = speakers.pop(address, None)
+            if entity is not None:
+                hass.async_create_task(entity.async_remove(force_remove=True))
+            return
         _add_speaker(address)
 
     for address in client.speakers:
@@ -47,7 +56,7 @@ async def async_setup_entry(
 class BLHAOSMediaPlayer(MediaPlayerEntity):
     """A cached Bluetooth speaker exposed through the native bridge."""
 
-    _attr_has_entity_name = True
+    _attr_has_entity_name = False
     _attr_device_class = MediaPlayerDeviceClass.SPEAKER
     _attr_should_poll = False
     _attr_supported_features = (

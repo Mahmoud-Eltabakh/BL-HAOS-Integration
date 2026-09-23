@@ -1,0 +1,14 @@
+{
+  "speakers": {
+    "aa:bb:cc:dd:ee:01": {
+      "address": "AA:BB:CC:DD:EE:01",
+      "name": "Kitchen Speaker",
+      "available": true,
+      "connected": true,
+      "trusted": true,
+      "is_audio_sink": true,
+      "adapter": "hci0",
+      "playback": {"state": "playing", "volume": 0.55}
+    }
+  }
+}

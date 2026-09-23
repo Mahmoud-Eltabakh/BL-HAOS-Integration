@@ -18,6 +18,8 @@ async def async_get_config_entry_diagnostics(
     client = entry.runtime_data.client
     speakers = list(client.speakers.values())
     payload = {
+        "contract_version": 1,
+        "health_status": "healthy" if client.transport_available else "unavailable",
         "entry": {
             "entry_id": entry.entry_id,
             "endpoint_configured": bool(entry.data.get(CONF_ENDPOINT)),
@@ -26,6 +28,11 @@ async def async_get_config_entry_diagnostics(
             "available": client.transport_available,
             "speaker_count": len(speakers),
             "connected_speaker_count": sum(bool(speaker.get("connected")) for speaker in speakers),
+        },
+        "support_bundle": {
+            "available": client.transport_available,
+            "schema": "bl-haos.support-bundle",
+            "versions": {"diagnostics": 1, "events": 1, "health": 1},
         },
         "speakers": [
             {

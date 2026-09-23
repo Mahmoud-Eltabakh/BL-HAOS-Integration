@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ipaddress
 from urllib.parse import urlsplit
 
 import aiohttp
@@ -10,7 +9,7 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import BRIDGE_ID, BRIDGE_UNIQUE_ID, CONF_ENDPOINT, DOMAIN, NATIVE_API_PATH
+from .const import BRIDGE_ID, BRIDGE_UNIQUE_ID, CONF_ENDPOINT, CONF_TOKEN, DOMAIN, NATIVE_API_PATH
 
 
 class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -49,12 +48,13 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return None
         return f"http://{slug.replace('_', '-')}:8099"
 
-    async def _async_validate_connection(self, endpoint: str) -> bool:
+    async def _async_validate_connection(self, endpoint: str, token: str) -> bool:
         """Validate the native bridge identity before storing an entry."""
         for target in (endpoint, endpoint.replace("_", "-")):
             try:
                 async with async_get_clientsession(self.hass).get(
                     f"{target}{NATIVE_API_PATH}/identity",
+                    headers={"Authorization": f"Bearer {token}"},
                     timeout=aiohttp.ClientTimeout(total=5),
                 ) as response:
                     payload = await response.json()
@@ -71,19 +71,21 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors = {}
         if user_input is not None:
             raw_endpoint = user_input.get(CONF_ENDPOINT, "")
+            token = str(user_input.get(CONF_TOKEN, "")).strip()
             endpoint = self._validate_endpoint(raw_endpoint)
-            if endpoint is not None:
+            if endpoint is not None and token:
                 for candidate in (endpoint, endpoint.replace("_", "-")):
-                    if await self._async_validate_connection(candidate):
+                    if await self._async_validate_connection(candidate, token):
                         return self.async_create_entry(
                             title="BL-HAOS Bluetooth Audio",
-                            data={CONF_ENDPOINT: candidate},
+                            data={CONF_ENDPOINT: candidate, CONF_TOKEN: token},
                         )
             errors["base"] = "cannot_connect"
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema({
                 vol.Required(CONF_ENDPOINT, default="http://c839f4a9-bl-haos:8099"): str,
+                vol.Required(CONF_TOKEN): str,
             }),
             errors=errors,
         )
@@ -91,7 +93,7 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_hassio(self, discovery_info):
         """Discover a Bridge add-on through the Supervisor service registry."""
         endpoint = self._endpoint_from_hassio_slug(discovery_info.slug)
-        if endpoint is None or not await self._async_validate_connection(endpoint):
+        if endpoint is None:
             return self.async_abort(reason="cannot_connect")
         await self.async_set_unique_id(BRIDGE_UNIQUE_ID)
         self._abort_if_unique_id_configured(updates={CONF_ENDPOINT: endpoint})
@@ -102,7 +104,13 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_hassio_confirm(self, user_input=None):
         """Create the discovered add-on entry after one user confirmation."""
         if user_input is None:
-            return self.async_show_form(step_id="hassio_confirm", data_schema=vol.Schema({}))
+            return self.async_show_form(
+                step_id="hassio_confirm",
+                data_schema=vol.Schema({vol.Required(CONF_TOKEN): str}),
+            )
+        if not await self._async_validate_connection(self._discovered_endpoint, user_input[CONF_TOKEN]):
+            return self.async_abort(reason="cannot_connect")
         return self.async_create_entry(
-            title="BL-HAOS Bluetooth Audio", data={CONF_ENDPOINT: self._discovered_endpoint}
+            title="BL-HAOS Bluetooth Audio",
+            data={CONF_ENDPOINT: self._discovered_endpoint, CONF_TOKEN: user_input[CONF_TOKEN]},
         )

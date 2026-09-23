@@ -5,11 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers import entity_registry as er
 
 from .client import BLHAOSClient
-from .const import CONF_ENDPOINT, DOMAIN, PLATFORMS
+from .const import CONF_ENDPOINT, CONF_TOKEN, DOMAIN, PLATFORMS
 
 
 @dataclass
@@ -21,7 +22,7 @@ class BLHAOSRuntime:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up BL-HAOS from a config entry."""
-    client = BLHAOSClient(hass, entry.data[CONF_ENDPOINT])
+    client = BLHAOSClient(hass, entry.data[CONF_ENDPOINT], entry.data[CONF_TOKEN])
     try:
         await client.async_initialize()
     except Exception as error:
@@ -37,4 +38,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
         await entry.runtime_data.client.async_close()
+        registry = er.async_get(hass)
+        for entity in er.async_entries_for_config_entry(registry, entry.entry_id):
+            hass.states.async_remove(entity.entity_id)
     return unloaded

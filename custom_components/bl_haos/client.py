@@ -26,9 +26,10 @@ def normalize_address(address: str) -> str | None:
 class BLHAOSClient:
     """Maintain the cached state of trusted BL-HAOS speakers."""
 
-    def __init__(self, hass: HomeAssistant, endpoint: str) -> None:
+    def __init__(self, hass: HomeAssistant, endpoint: str, token: str) -> None:
         self.hass = hass
         self.endpoint = endpoint.rstrip("/")
+        self.token = token
         self.speakers: dict[str, dict[str, Any]] = {}
         self._update_listeners: set[Callable[[str], None]] = set()
         self._websocket_task: asyncio.Task[None] | None = None
@@ -37,7 +38,7 @@ class BLHAOSClient:
 
     @property
     def _headers(self) -> dict[str, str]:
-        return {}
+        return {"Authorization": f"Bearer {self.token}"}
 
     async def async_initialize(self) -> None:
         """Validate identity, cache the snapshot, and start event updates."""
@@ -49,15 +50,27 @@ class BLHAOSClient:
         await self._async_refresh_snapshot(session)
         self.transport_available = True
         if self._websocket_task is None:
-            self._websocket_task = self.hass.async_create_task(self._async_listen())
+            create_background_task = getattr(self.hass, "async_create_background_task", None)
+            if create_background_task is not None:
+                self._websocket_task = create_background_task(self._async_listen(), name="bl_haos_websocket")
+            else:
+                self._websocket_task = self.hass.async_create_task(self._async_listen())
 
     async def _async_refresh_snapshot(self, session: aiohttp.ClientSession) -> None:
         async with session.get(f"{self.endpoint}{NATIVE_API_PATH}/speakers", headers=self._headers) as response:
             payload = await response.json()
             if response.status != 200:
                 raise aiohttp.ClientError("Unable to load BL-HAOS speakers")
+        snapshot_addresses: set[str] = set()
         for speaker in payload.get("speakers", {}).values():
+            address = normalize_address(str(speaker.get("address", ""))) if isinstance(speaker, dict) else None
+            if address is not None:
+                snapshot_addresses.add(address)
             self._async_process_speaker(speaker)
+        for address in set(self.speakers) - snapshot_addresses:
+            del self.speakers[address]
+            for listener in tuple(self._update_listeners):
+                listener(address)
 
     async def async_command(self, address: str, operation: str, **options: Any) -> dict[str, Any]:
         """Submit a native command and cache its authoritative acknowledgement."""
@@ -113,7 +126,7 @@ class BLHAOSClient:
         session = async_get_clientsession(self.hass)
         while not self._closed:
             try:
-                async with session.ws_connect(websocket_url, headers=self._headers) as websocket:
+                async with session.ws_connect(websocket_url, headers=self._headers, heartbeat=30) as websocket:
                     delay = 1
                     await self._async_refresh_snapshot(session)
                     self._set_transport_available(True)
@@ -126,7 +139,6 @@ class BLHAOSClient:
                 pass
             if self._closed:
                 return
-            self._set_transport_available(False)
             await asyncio.sleep(delay)
             delay = min(delay * 2, 30)
 

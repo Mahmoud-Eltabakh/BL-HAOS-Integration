@@ -4,9 +4,10 @@
     "step": {
       "user": {
         "title": "BL-HAOS Bluetooth Audio",
-        "description": "Enter the BL-HAOS add-on endpoint (e.g. http://c839f4a9-bl-haos:8099 or http://localhost:8099).",
+        "description": "Enter the BL-HAOS add-on endpoint and native bridge token.",
         "data": {
-          "endpoint": "Endpoint URL"
+          "endpoint": "Endpoint URL",
+          "token": "Native bridge token"
         }
       },
       "hassio_confirm": {
