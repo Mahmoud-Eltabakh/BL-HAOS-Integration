@@ -115,6 +115,40 @@ async def test_config_flow_accepts_identity_and_rejects_bad_connection(hass, bri
     assert result["data"] == {CONF_ENDPOINT: ENDPOINT, CONF_TOKEN: TOKEN}
 
 
+async def test_hassio_discovery_with_token_auto_creates_entry(hass, bridge_session):
+    from homeassistant.helpers.service_info.hassio import HassioServiceInfo
+
+    bridge_session.identity = {"bridge_id": "bl_haos_native_bridge", "version": 1}
+    client_patch, flow_patch = _patch_session(bridge_session)
+    discovery_info = HassioServiceInfo(
+        config={"token": TOKEN}, name="BL-HAOS", slug="c839f4a9_bl_haos", uuid="uuid"
+    )
+    with client_patch, flow_patch:
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_HASSIO}, data=discovery_info
+        )
+    assert result["type"] == "create_entry"
+    assert result["data"] == {CONF_ENDPOINT: "http://c839f4a9-bl-haos:8099", CONF_TOKEN: TOKEN}
+
+
+async def test_hassio_discovery_without_token_falls_back_to_manual_prompt(hass, bridge_session):
+    from homeassistant.helpers.service_info.hassio import HassioServiceInfo
+
+    client_patch, flow_patch = _patch_session(bridge_session)
+    discovery_info = HassioServiceInfo(config={}, name="BL-HAOS", slug="c839f4a9_bl_haos", uuid="uuid")
+    with client_patch, flow_patch:
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_HASSIO}, data=discovery_info
+        )
+        assert result["type"] == "form"
+        assert result["step_id"] == "hassio_confirm"
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], user_input={CONF_TOKEN: TOKEN}
+        )
+    assert result["type"] == "create_entry"
+    assert result["data"] == {CONF_ENDPOINT: "http://c839f4a9-bl-haos:8099", CONF_TOKEN: TOKEN}
+
+
 async def test_unload_closes_client_and_removes_entities(hass, bridge_session):
     entry = await _setup_entry(hass, bridge_session)
     client = entry.runtime_data.client

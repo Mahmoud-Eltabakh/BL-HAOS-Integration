@@ -98,8 +98,14 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         await self.async_set_unique_id(BRIDGE_UNIQUE_ID)
         self._abort_if_unique_id_configured(updates={CONF_ENDPOINT: endpoint})
         self._discovered_endpoint = endpoint
+        self._discovered_token = str((discovery_info.config or {}).get("token", "")).strip()
         self.context["title_placeholders"] = {"name": discovery_info.name}
-        return self.async_show_form(step_id="hassio_confirm", data_schema=vol.Schema({}))
+        if self._discovered_token and await self._async_validate_connection(endpoint, self._discovered_token):
+            return self.async_create_entry(
+                title="BL-HAOS Bluetooth Audio",
+                data={CONF_ENDPOINT: endpoint, CONF_TOKEN: self._discovered_token},
+            )
+        return await self.async_step_hassio_confirm()
 
     async def async_step_hassio_confirm(self, user_input=None):
         """Create the discovered add-on entry after one user confirmation."""
