@@ -33,8 +33,9 @@ class FakeResponse:
 class FakeWebSocket:
     """A controllable websocket transport that emits no unsolicited events."""
 
-    def __init__(self, available: bool) -> None:
+    def __init__(self, available: bool, messages: list[Any] | None = None) -> None:
         self.available = available
+        self.messages = messages or []
 
     async def __aenter__(self) -> "FakeWebSocket":
         if not self.available:
@@ -48,6 +49,8 @@ class FakeWebSocket:
         return self
 
     async def __anext__(self) -> Any:
+        if self.messages:
+            return self.messages.pop(0)
         await asyncio.Future()
 
 
@@ -58,6 +61,8 @@ class FakeSession:
         self.speakers = speakers
         self.identity = {"bridge_id": "bl_haos_native_bridge", "version": 1}
         self.websocket_available = True
+        self.websocket_messages: list[Any] = []
+        self.last_ws_url: str | None = None
 
     def get(self, url: str, **kwargs: Any) -> FakeResponse:
         if url.endswith("/identity"):
@@ -70,7 +75,8 @@ class FakeSession:
         raise AssertionError(f"Unexpected SIL POST: {url}")
 
     def ws_connect(self, url: str, **kwargs: Any) -> FakeWebSocket:
-        return FakeWebSocket(self.websocket_available)
+        self.last_ws_url = url
+        return FakeWebSocket(self.websocket_available, self.websocket_messages)
 
 
 def load_snapshot(name: str) -> dict[str, Any]:

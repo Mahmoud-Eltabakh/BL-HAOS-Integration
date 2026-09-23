@@ -15,6 +15,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .const import BRIDGE_ID, NATIVE_API_PATH
 
 _MAC_ADDRESS = re.compile(r"^[0-9a-f]{2}(?::[0-9a-f]{2}){5}$")
+_COMMAND_TIMEOUT = aiohttp.ClientTimeout(total=30)
 
 
 def normalize_address(address: str) -> str | None:
@@ -61,12 +62,13 @@ class BLHAOSClient:
             payload = await response.json()
             if response.status != 200:
                 raise aiohttp.ClientError("Unable to load BL-HAOS speakers")
+        if not isinstance(payload, dict) or not isinstance(payload.get("speakers"), dict):
+            raise ValueError("Invalid BL-HAOS speakers snapshot")
         snapshot_addresses: set[str] = set()
-        for speaker in payload.get("speakers", {}).values():
-            address = normalize_address(str(speaker.get("address", ""))) if isinstance(speaker, dict) else None
+        for speaker in payload["speakers"].values():
+            address = self._async_process_speaker(speaker)
             if address is not None:
                 snapshot_addresses.add(address)
-            self._async_process_speaker(speaker)
         for address in set(self.speakers) - snapshot_addresses:
             del self.speakers[address]
             for listener in tuple(self._update_listeners):
@@ -80,7 +82,10 @@ class BLHAOSClient:
         payload = {"version": 1, "operation": operation, **{key: value for key, value in options.items() if value is not None}}
         session = async_get_clientsession(self.hass)
         async with session.post(
-            f"{self.endpoint}{NATIVE_API_PATH}/speakers/{normalized}/command", headers=self._headers, json=payload
+            f"{self.endpoint}{NATIVE_API_PATH}/speakers/{normalized}/command",
+            headers=self._headers,
+            json=payload,
+            timeout=_COMMAND_TIMEOUT,
         ) as response:
             body = await response.json()
             if response.status != 200:
@@ -101,27 +106,29 @@ class BLHAOSClient:
         """Read cached speaker data without network I/O."""
         return self.speakers.get(address)
 
-    def _async_process_speaker(self, speaker: Any) -> None:
+    def _async_process_speaker(self, speaker: Any) -> str | None:
         if not isinstance(speaker, dict):
-            return
+            return None
         is_audio = speaker.get("is_audio_sink", True)
         is_valid_sink = bool(speaker.get("trusted") or speaker.get("paired") or speaker.get("connected") or speaker.get("available"))
         if not (is_audio and is_valid_sink):
-            return
+            return None
         address = normalize_address(str(speaker.get("address", "")))
         if address is None:
-            return
+            return None
         normalized_speaker = {**speaker, "address": address}
         if self.speakers.get(address) == normalized_speaker:
-            return
+            return address
         self.speakers[address] = normalized_speaker
         for listener in tuple(self._update_listeners):
             listener(address)
+        return address
 
     async def _async_listen(self) -> None:
         """Reconnect to the native event stream until the entry is unloaded."""
         parsed = urlsplit(self.endpoint)
-        websocket_url = urlunsplit(("ws", parsed.netloc, "/ws/native", "", ""))
+        websocket_scheme = "wss" if parsed.scheme == "https" else "ws"
+        websocket_url = urlunsplit((websocket_scheme, parsed.netloc, "/ws/native", "", ""))
         delay = 1
         session = async_get_clientsession(self.hass)
         while not self._closed:
@@ -133,6 +140,8 @@ class BLHAOSClient:
                     async for message in websocket:
                         if message.type == aiohttp.WSMsgType.TEXT:
                             payload = message.json()
+                            if not isinstance(payload, dict):
+                                raise ValueError("Invalid BL-HAOS native event")
                             if payload.get("event") == "speaker_updated":
                                 self._async_process_speaker(payload.get("data"))
             except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):

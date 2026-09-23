@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import os
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import aiohttp
 import pytest
 from homeassistant import config_entries
 from homeassistant.helpers import entity_registry as er
@@ -197,6 +199,59 @@ async def test_websocket_failure_marks_transport_unavailable(hass, bridge_sessio
     assert not client.transport_available
 
 
+async def test_websocket_scheme_matches_endpoint(hass, bridge_session):
+    for endpoint, expected in (("http://bl-haos:8099", "ws://bl-haos:8099/ws/native"), ("https://bl-haos:8099", "wss://bl-haos:8099/ws/native")):
+        client = BLHAOSClient(hass, endpoint, TOKEN)
+        bridge_session.websocket_available = False
+
+        async def stop_after_failure(_delay):
+            client._closed = True
+
+        with (
+            patch("custom_components.bl_haos.client.async_get_clientsession", return_value=bridge_session),
+            patch("custom_components.bl_haos.client.asyncio.sleep", AsyncMock(side_effect=stop_after_failure)),
+        ):
+            await client._async_listen()
+
+        assert bridge_session.last_ws_url == expected
+
+
+async def test_malformed_websocket_event_reconnects(hass, bridge_session):
+    client = BLHAOSClient(hass, ENDPOINT, TOKEN)
+    bridge_session.websocket_messages = [
+        SimpleNamespace(type=aiohttp.WSMsgType.TEXT, json=lambda: ["invalid"])
+    ]
+
+    async def stop_after_failure(_delay):
+        client._closed = True
+
+    with (
+        patch("custom_components.bl_haos.client.async_get_clientsession", return_value=bridge_session),
+        patch("custom_components.bl_haos.client.asyncio.sleep", AsyncMock(side_effect=stop_after_failure)),
+    ):
+        await client._async_listen()
+
+    assert not client.transport_available
+
+
+async def test_malformed_snapshot_is_rejected(hass, bridge_session):
+    client = BLHAOSClient(hass, ENDPOINT, TOKEN)
+    bridge_session.speakers = {"speakers": []}
+
+    with pytest.raises(ValueError, match="Invalid BL-HAOS speakers snapshot"):
+        await client._async_refresh_snapshot(bridge_session)
+
+
+async def test_snapshot_eviction_removes_rejected_speaker(hass, bridge_session):
+    client = BLHAOSClient(hass, ENDPOINT, TOKEN)
+    await client._async_refresh_snapshot(bridge_session)
+
+    bridge_session.speakers["aa:bb:cc:dd:ee:01"]["is_audio_sink"] = False
+    await client._async_refresh_snapshot(bridge_session)
+
+    assert "aa:bb:cc:dd:ee:01" not in client.speakers
+
+
 async def test_unload_closes_client_and_removes_entities(hass, bridge_session):
     entry = await _setup_entry(hass, bridge_session)
     client = entry.runtime_data.client
@@ -246,3 +301,16 @@ async def test_media_player_supports_browsing_folders_and_media_sources(hass, br
 
     assert browse_result is not None
     assert browse_result.media_content_id is not None
+
+
+async def test_media_player_ignores_resume_when_no_media_is_active(hass, bridge_session):
+    entry = await _setup_entry(hass, bridge_session)
+    component = hass.data["entity_components"]["media_player"]
+    player = component.get_entity("media_player.kitchen_speaker")
+
+    with patch.object(
+        entry.runtime_data.client,
+        "async_command",
+        new=AsyncMock(side_effect=aiohttp.ClientError("No active playback to resume")),
+    ):
+        await player.async_media_play()

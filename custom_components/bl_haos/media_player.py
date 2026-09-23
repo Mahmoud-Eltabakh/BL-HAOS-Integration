@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+import aiohttp
 from homeassistant.components.media_player import (
     BrowseMedia,
     MediaPlayerDeviceClass,
@@ -122,7 +123,11 @@ class BLHAOSMediaPlayer(MediaPlayerEntity):
             self.async_write_ha_state()
 
     async def async_media_play(self) -> None:
-        await self._client.async_command(self._address, "play")
+        try:
+            await self._client.async_command(self._address, "play")
+        except aiohttp.ClientError as error:
+            if str(error) != "No active playback to resume":
+                raise
 
     async def async_media_pause(self) -> None:
         await self._client.async_command(self._address, "pause")
