@@ -5,12 +5,14 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from homeassistant.components.media_player import (
+    BrowseMedia,
     MediaPlayerDeviceClass,
     MediaPlayerEntity,
     MediaPlayerEntityFeature,
     async_process_play_media_url,
 )
 from homeassistant.components.media_source import (
+    async_browse_media,
     async_resolve_media,
     is_media_source_id,
 )
@@ -65,6 +67,7 @@ class BLHAOSMediaPlayer(MediaPlayerEntity):
         | MediaPlayerEntityFeature.STOP
         | MediaPlayerEntityFeature.VOLUME_SET
         | MediaPlayerEntityFeature.PLAY_MEDIA
+        | MediaPlayerEntityFeature.BROWSE_MEDIA
     )
 
     def __init__(self, client: BLHAOSClient, address: str) -> None:
@@ -140,3 +143,9 @@ class BLHAOSMediaPlayer(MediaPlayerEntity):
             media_type = media.mime_type or media_type
         url = async_process_play_media_url(self.hass, media_id)
         await self._client.async_command(self._address, "play_media", url=url, media_type=media_type)
+
+    async def async_browse_media(
+        self, media_content_type: str | None = None, media_content_id: str | None = None
+    ) -> BrowseMedia:
+        """Let the Home Assistant UI browse folders/media sources for this speaker."""
+        return await async_browse_media(self.hass, media_content_id)

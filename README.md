@@ -2,6 +2,8 @@
 
 This HACS custom integration exposes trusted BL-HAOS Bluetooth speakers as native Home Assistant `media_player` entities. It uses the Bridge add-on's private Supervisor-network REST snapshot and WebSocket event stream; it does not use MQTT or a user-managed key.
 
+Each speaker entity supports Home Assistant's media browser (`BROWSE_MEDIA`), so you can browse local media folders and other configured media sources directly from the Home Assistant UI instead of only playing media by URL.
+
 ## Install
 
 1. In HACS, add `https://github.com/Mahmoud-Eltabakh/BL-HAOS-Integration` as a custom **Integration** repository and install **BL-HAOS Bluetooth Audio**.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from unittest.mock import patch
 
 import pytest
@@ -174,3 +175,27 @@ async def test_diagnostics_contains_bounded_operator_contract(hass, bridge_sessi
     assert payload["support_bundle"]["versions"] == {"diagnostics": 1, "events": 1, "health": 1}
     assert TOKEN not in str(payload)
     assert ENDPOINT not in str(payload)
+
+
+async def test_media_player_supports_browsing_folders_and_media_sources(hass, bridge_session):
+    from homeassistant.components.media_player import MediaPlayerEntityFeature
+    from homeassistant.setup import async_setup_component
+
+    await async_setup_component(hass, "media_source", {})
+    for media_dir in hass.config.media_dirs.values():
+        os.makedirs(media_dir, exist_ok=True)
+    entry = await _setup_entry(hass, bridge_session)
+    states = _media_players(hass)
+    kitchen_entity_id = next(
+        entity_id for entity_id, state in states.items() if state.name == "Kitchen Speaker"
+    )
+
+    assert states[kitchen_entity_id].attributes["supported_features"] & MediaPlayerEntityFeature.BROWSE_MEDIA
+
+    component = hass.data["entity_components"]["media_player"]
+    player = component.get_entity(kitchen_entity_id)
+
+    browse_result = await player.async_browse_media()
+
+    assert browse_result is not None
+    assert browse_result.media_content_id is not None
