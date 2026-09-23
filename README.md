@@ -10,7 +10,7 @@ Each speaker entity supports Home Assistant's media browser (`BROWSE_MEDIA`), so
 2. Restart Home Assistant.
 3. Home Assistant discovers the Bridge add-on. Confirm the **BL-HAOS Bluetooth Audio** setup prompt.
 
-The integration derives the add-on's private hostname from Supervisor discovery, validates `GET /api/native/identity`, then reads `GET /api/native/speakers` and listens on `/ws/native` for updates. The Bridge add-on pushes its native token through the same Supervisor discovery message, so the config flow completes automatically with no manual token entry when discovery succeeds. A manual local endpoint and token entry are available only as a fallback.
+The integration derives the add-on's private hostname from Supervisor discovery, validates `GET /api/native/identity`, then reads `GET /api/native/speakers` and listens on `/ws/native` for updates. The Bridge add-on pushes its native token through the same Supervisor discovery message, so the config flow completes automatically with no manual token entry when discovery succeeds. Existing entries also refresh this credential when the add-on rotates it after a reinstall or data reset. A manual local endpoint and token entry are available only as a fallback.
 
 ## Security
 

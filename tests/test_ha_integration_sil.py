@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from homeassistant import config_entries
@@ -11,6 +11,7 @@ from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.bl_haos.const import CONF_ENDPOINT, CONF_TOKEN, DOMAIN
+from custom_components.bl_haos.client import BLHAOSClient
 from custom_components.bl_haos.diagnostics import async_get_config_entry_diagnostics
 
 from conftest import FakeSession, load_snapshot
@@ -132,6 +133,35 @@ async def test_hassio_discovery_with_token_auto_creates_entry(hass, bridge_sessi
     assert result["data"] == {CONF_ENDPOINT: "http://c839f4a9-bl-haos:8099", CONF_TOKEN: TOKEN}
 
 
+async def test_hassio_discovery_refreshes_existing_entry_credentials(hass, bridge_session):
+    from homeassistant.helpers.service_info.hassio import HassioServiceInfo
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_ENDPOINT: "http://old-bridge:8099", CONF_TOKEN: "stale-token"},
+        title="BL-HAOS Bluetooth Audio",
+        unique_id="bl_haos_native_bridge",
+    )
+    entry.add_to_hass(hass)
+    discovery_info = HassioServiceInfo(
+        config={"token": TOKEN}, name="BL-HAOS", slug="c839f4a9_bl_haos", uuid="uuid"
+    )
+    client_patch, flow_patch = _patch_session(bridge_session)
+
+    with client_patch, flow_patch:
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_HASSIO}, data=discovery_info
+        )
+
+    assert result["type"] == "abort"
+    updated_entry = hass.config_entries.async_get_entry(entry.entry_id)
+    assert updated_entry is not None
+    assert updated_entry.data == {
+        CONF_ENDPOINT: "http://c839f4a9-bl-haos:8099",
+        CONF_TOKEN: TOKEN,
+    }
+
+
 async def test_hassio_discovery_without_token_falls_back_to_manual_prompt(hass, bridge_session):
     from homeassistant.helpers.service_info.hassio import HassioServiceInfo
 
@@ -148,6 +178,23 @@ async def test_hassio_discovery_without_token_falls_back_to_manual_prompt(hass, 
         )
     assert result["type"] == "create_entry"
     assert result["data"] == {CONF_ENDPOINT: "http://c839f4a9-bl-haos:8099", CONF_TOKEN: TOKEN}
+
+
+async def test_websocket_failure_marks_transport_unavailable(hass, bridge_session):
+    client = BLHAOSClient(hass, ENDPOINT, TOKEN)
+    client.transport_available = True
+    bridge_session.websocket_available = False
+
+    async def stop_after_failure(_delay):
+        client._closed = True
+
+    with (
+        patch("custom_components.bl_haos.client.async_get_clientsession", return_value=bridge_session),
+        patch("custom_components.bl_haos.client.asyncio.sleep", AsyncMock(side_effect=stop_after_failure)),
+    ):
+        await client._async_listen()
+
+    assert not client.transport_available
 
 
 async def test_unload_closes_client_and_removes_entities(hass, bridge_session):

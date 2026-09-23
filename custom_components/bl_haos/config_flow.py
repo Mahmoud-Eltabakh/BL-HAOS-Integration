@@ -96,11 +96,17 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if endpoint is None:
             return self.async_abort(reason="cannot_connect")
         await self.async_set_unique_id(BRIDGE_UNIQUE_ID)
-        self._abort_if_unique_id_configured(updates={CONF_ENDPOINT: endpoint})
         self._discovered_endpoint = endpoint
         self._discovered_token = str((discovery_info.config or {}).get("token", "")).strip()
         self.context["title_placeholders"] = {"name": discovery_info.name}
-        if self._discovered_token and await self._async_validate_connection(endpoint, self._discovered_token):
+        connection_valid = bool(self._discovered_token) and await self._async_validate_connection(
+            endpoint, self._discovered_token
+        )
+        updates = {CONF_ENDPOINT: endpoint}
+        if connection_valid:
+            updates[CONF_TOKEN] = self._discovered_token
+        self._abort_if_unique_id_configured(updates=updates)
+        if connection_valid:
             return self.async_create_entry(
                 title="BL-HAOS Bluetooth Audio",
                 data={CONF_ENDPOINT: endpoint, CONF_TOKEN: self._discovered_token},

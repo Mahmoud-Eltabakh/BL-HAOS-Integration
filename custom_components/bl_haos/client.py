@@ -136,7 +136,7 @@ class BLHAOSClient:
                             if payload.get("event") == "speaker_updated":
                                 self._async_process_speaker(payload.get("data"))
             except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
-                pass
+                self._set_transport_available(False)
             if self._closed:
                 return
             await asyncio.sleep(delay)

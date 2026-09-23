@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -30,13 +31,24 @@ class FakeResponse:
 
 
 class FakeWebSocket:
-    """A websocket transport that stays unavailable without network access."""
+    """A controllable websocket transport that emits no unsolicited events."""
+
+    def __init__(self, available: bool) -> None:
+        self.available = available
 
     async def __aenter__(self) -> "FakeWebSocket":
-        raise aiohttp.ClientError("SIL websocket transport is intentionally offline")
+        if not self.available:
+            raise aiohttp.ClientError("SIL websocket transport is intentionally offline")
+        return self
 
     async def __aexit__(self, *args: Any) -> None:
         return None
+
+    def __aiter__(self) -> "FakeWebSocket":
+        return self
+
+    async def __anext__(self) -> Any:
+        await asyncio.Future()
 
 
 class FakeSession:
@@ -45,6 +57,7 @@ class FakeSession:
     def __init__(self, speakers: dict[str, Any]) -> None:
         self.speakers = speakers
         self.identity = {"bridge_id": "bl_haos_native_bridge", "version": 1}
+        self.websocket_available = True
 
     def get(self, url: str, **kwargs: Any) -> FakeResponse:
         if url.endswith("/identity"):
@@ -57,7 +70,7 @@ class FakeSession:
         raise AssertionError(f"Unexpected SIL POST: {url}")
 
     def ws_connect(self, url: str, **kwargs: Any) -> FakeWebSocket:
-        return FakeWebSocket()
+        return FakeWebSocket(self.websocket_available)
 
 
 def load_snapshot(name: str) -> dict[str, Any]:
