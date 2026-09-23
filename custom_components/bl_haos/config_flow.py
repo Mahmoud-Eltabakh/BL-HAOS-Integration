@@ -105,6 +105,17 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         updates = {CONF_ENDPOINT: endpoint}
         if connection_valid:
             updates[CONF_TOKEN] = self._discovered_token
+        existing_entry = next(
+            (entry for entry in self.hass.config_entries.async_entries(DOMAIN)
+             if entry.unique_id == BRIDGE_UNIQUE_ID),
+            None,
+        )
+        if existing_entry and connection_valid:
+            new_data = {**existing_entry.data, **updates}
+            if new_data != existing_entry.data:
+                self.hass.config_entries.async_update_entry(existing_entry, data=new_data)
+                await self.hass.config_entries.async_reload(existing_entry.entry_id)
+            return self.async_abort(reason="already_configured")
         self._abort_if_unique_id_configured(updates=updates)
         if connection_valid:
             return self.async_create_entry(
