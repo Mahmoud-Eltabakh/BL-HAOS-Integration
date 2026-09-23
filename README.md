@@ -8,7 +8,7 @@ This HACS custom integration exposes trusted BL-HAOS Bluetooth speakers as nativ
 2. Restart Home Assistant.
 3. Home Assistant discovers the Bridge add-on. Confirm the **BL-HAOS Bluetooth Audio** setup prompt.
 
-The integration derives the add-on's private hostname from Supervisor discovery, validates `GET /api/native/identity`, then reads `GET /api/native/speakers` and listens on `/ws/native` for updates. A manual local endpoint is available only as a fallback.
+The integration derives the add-on's private hostname from Supervisor discovery, validates `GET /api/native/identity`, then reads `GET /api/native/speakers` and listens on `/ws/native` for updates. The Bridge add-on pushes its native token through the same Supervisor discovery message, so the config flow completes automatically with no manual token entry when discovery succeeds. A manual local endpoint and token entry are available only as a fallback.
 
 ## Security
 
