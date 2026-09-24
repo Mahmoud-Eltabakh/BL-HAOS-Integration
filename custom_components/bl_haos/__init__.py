@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 from homeassistant.config_entries import ConfigEntry
@@ -11,6 +12,8 @@ from homeassistant.helpers import entity_registry as er
 
 from .client import BLHAOSClient
 from .const import CONF_ENDPOINT, CONF_TOKEN, DOMAIN, PLATFORMS
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
@@ -22,23 +25,43 @@ class BLHAOSRuntime:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up BL-HAOS from a config entry."""
+    _LOGGER.debug(
+        "Setting up BL-HAOS config entry %s (endpoint: %s)",
+        entry.entry_id,
+        entry.data.get(CONF_ENDPOINT),
+    )
     client = BLHAOSClient(hass, entry.data[CONF_ENDPOINT], entry.data[CONF_TOKEN])
     try:
         await client.async_initialize()
+        _LOGGER.debug(
+            "BL-HAOS client initialized successfully for entry %s (transport_available=%s)",
+            entry.entry_id,
+            client.transport_available,
+        )
     except Exception as error:
+        _LOGGER.debug("Failed to initialize BL-HAOS client for entry %s: %s", entry.entry_id, error)
         await client.async_close()
         raise ConfigEntryNotReady("BL-HAOS add-on is unavailable") from error
     entry.runtime_data = BLHAOSRuntime(client)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    _LOGGER.debug(
+        "BL-HAOS config entry %s setup completed with platforms: %s",
+        entry.entry_id,
+        PLATFORMS,
+    )
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a BL-HAOS config entry."""
+    _LOGGER.debug("Unloading BL-HAOS config entry %s", entry.entry_id)
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
         await entry.runtime_data.client.async_close()
         registry = er.async_get(hass)
         for entity in er.async_entries_for_config_entry(registry, entry.entry_id):
             hass.states.async_remove(entity.entity_id)
+        _LOGGER.debug("BL-HAOS config entry %s unloaded successfully", entry.entry_id)
+    else:
+        _LOGGER.debug("BL-HAOS config entry %s unload returned False", entry.entry_id)
     return unloaded

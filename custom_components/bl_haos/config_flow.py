@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from urllib.parse import urlsplit
 
 import aiohttp
@@ -10,6 +11,8 @@ from homeassistant import config_entries
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import BRIDGE_ID, BRIDGE_UNIQUE_ID, CONF_ENDPOINT, CONF_TOKEN, DOMAIN, NATIVE_API_PATH
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -52,6 +55,7 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Validate the native bridge identity before storing an entry."""
         for target in (endpoint, endpoint.replace("_", "-")):
             try:
+                _LOGGER.debug("Validating bridge connection to endpoint: %s", target)
                 async with async_get_clientsession(self.hass).get(
                     f"{target}{NATIVE_API_PATH}/identity",
                     headers={"Authorization": f"Bearer {token}"},
@@ -59,8 +63,21 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ) as response:
                     payload = await response.json()
                     if response.status == 200 and payload.get("bridge_id") == BRIDGE_ID:
+                        _LOGGER.debug(
+                            "Bridge identity verified at %s (bridge_id=%s, version=%s)",
+                            target,
+                            payload.get("bridge_id"),
+                            payload.get("version"),
+                        )
                         return True
-            except (aiohttp.ClientError, TimeoutError, ValueError):
+                    _LOGGER.debug(
+                        "Bridge connection to %s returned unexpected response (status=%s, payload=%s)",
+                        target,
+                        response.status,
+                        payload,
+                    )
+            except (aiohttp.ClientError, TimeoutError, ValueError) as err:
+                _LOGGER.debug("Bridge validation attempt failed for %s: %s", target, err)
                 continue
         return False
 
@@ -73,13 +90,16 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             raw_endpoint = user_input.get(CONF_ENDPOINT, "")
             token = str(user_input.get(CONF_TOKEN, "")).strip()
             endpoint = self._validate_endpoint(raw_endpoint)
+            _LOGGER.debug("User submitted endpoint '%s' (normalized: '%s')", raw_endpoint, endpoint)
             if endpoint is not None and token:
                 for candidate in (endpoint, endpoint.replace("_", "-")):
                     if await self._async_validate_connection(candidate, token):
+                        _LOGGER.debug("Config flow user step creating entry for endpoint: %s", candidate)
                         return self.async_create_entry(
                             title="BL-HAOS Bluetooth Audio",
                             data={CONF_ENDPOINT: candidate, CONF_TOKEN: token},
                         )
+            _LOGGER.debug("User configuration failed connection validation for %s", raw_endpoint)
             errors["base"] = "cannot_connect"
         return self.async_show_form(
             step_id="user",
@@ -93,6 +113,7 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_hassio(self, discovery_info):
         """Discover a Bridge add-on through the Supervisor service registry."""
         endpoint = self._endpoint_from_hassio_slug(discovery_info.slug)
+        _LOGGER.debug("Hass.io discovery received: slug=%s, derived endpoint=%s", discovery_info.slug, endpoint)
         if endpoint is None:
             return self.async_abort(reason="cannot_connect")
         await self.async_set_unique_id(BRIDGE_UNIQUE_ID)
@@ -102,6 +123,7 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         connection_valid = bool(self._discovered_token) and await self._async_validate_connection(
             endpoint, self._discovered_token
         )
+        _LOGGER.debug("Hass.io discovery validation result: connection_valid=%s", connection_valid)
         updates = {CONF_ENDPOINT: endpoint}
         if connection_valid:
             updates[CONF_TOKEN] = self._discovered_token
@@ -113,11 +135,13 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if existing_entry and connection_valid:
             new_data = {**existing_entry.data, **updates}
             if new_data != existing_entry.data:
+                _LOGGER.debug("Updating existing BL-HAOS entry %s with new data", existing_entry.entry_id)
                 self.hass.config_entries.async_update_entry(existing_entry, data=new_data)
                 await self.hass.config_entries.async_reload(existing_entry.entry_id)
             return self.async_abort(reason="already_configured")
         self._abort_if_unique_id_configured(updates=updates)
         if connection_valid:
+            _LOGGER.debug("Creating entry from validated Hass.io discovery: %s", endpoint)
             return self.async_create_entry(
                 title="BL-HAOS Bluetooth Audio",
                 data={CONF_ENDPOINT: endpoint, CONF_TOKEN: self._discovered_token},
@@ -131,8 +155,11 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 step_id="hassio_confirm",
                 data_schema=vol.Schema({vol.Required(CONF_TOKEN): str}),
             )
+        _LOGGER.debug("Validating user-supplied token for Hass.io endpoint: %s", self._discovered_endpoint)
         if not await self._async_validate_connection(self._discovered_endpoint, user_input[CONF_TOKEN]):
+            _LOGGER.debug("Hass.io confirm validation failed for endpoint %s", self._discovered_endpoint)
             return self.async_abort(reason="cannot_connect")
+        _LOGGER.debug("Hass.io confirm succeeded, creating config entry for %s", self._discovered_endpoint)
         return self.async_create_entry(
             title="BL-HAOS Bluetooth Audio",
             data={CONF_ENDPOINT: self._discovered_endpoint, CONF_TOKEN: user_input[CONF_TOKEN]},

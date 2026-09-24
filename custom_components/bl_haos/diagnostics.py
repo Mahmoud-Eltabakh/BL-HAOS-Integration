@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -10,6 +11,8 @@ from homeassistant.helpers.redact import async_redact_data
 
 from .const import CONF_ENDPOINT
 
+_LOGGER = logging.getLogger(__name__)
+
 
 async def async_get_config_entry_diagnostics(
     hass: HomeAssistant, entry: ConfigEntry
@@ -17,6 +20,12 @@ async def async_get_config_entry_diagnostics(
     """Return config-entry state without token, endpoint, or media-bearing data."""
     client = entry.runtime_data.client
     speakers = list(client.speakers.values())
+    _LOGGER.debug(
+        "Generating diagnostics for config entry %s (transport_available=%s, speaker_count=%d)",
+        entry.entry_id,
+        client.transport_available,
+        len(speakers),
+    )
     payload = {
         "contract_version": 1,
         "health_status": "healthy" if client.transport_available else "unavailable",

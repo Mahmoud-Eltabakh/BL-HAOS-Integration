@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import logging
 
 import aiohttp
 from homeassistant.components.media_player import (
@@ -17,6 +18,7 @@ from homeassistant.components.media_source import (
     async_resolve_media,
     is_media_source_id,
 )
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -24,6 +26,8 @@ from homeassistant.helpers.network import get_url
 
 from .client import BLHAOSClient, normalize_address
 from .const import DOMAIN
+
+_LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
@@ -34,22 +38,32 @@ async def async_setup_entry(
     """Set up cached BL-HAOS speakers and subscribe for native updates."""
     client: BLHAOSClient = entry.runtime_data.client
     speakers: dict[str, BLHAOSMediaPlayer] = {}
+    _LOGGER.debug(
+        "Setting up BL-HAOS media player platform for entry %s (%d initial speakers: %s)",
+        entry.entry_id,
+        len(client.speakers),
+        list(client.speakers.keys()),
+    )
 
     def _add_speaker(address: str) -> None:
         if address in speakers:
+            _LOGGER.debug("Updating existing media player entity for speaker %s", address)
             speakers[address].async_write_ha_state()
             return
         entity = BLHAOSMediaPlayer(client, address)
         speakers[address] = entity
+        _LOGGER.debug("Adding new media player entity for speaker %s (%s)", address, entity.name)
         async_add_entities([entity])
 
     @callback
     def async_discover_speaker(address: str) -> None:
         if address not in client.speakers:
+            _LOGGER.debug("Removing speaker entity for evicted address %s", address)
             entity = speakers.pop(address, None)
             if entity is not None:
                 hass.async_create_task(entity.async_remove(force_remove=True))
             return
+        _LOGGER.debug("Discovered / refreshed speaker %s", address)
         _add_speaker(address)
 
     for address in client.speakers:
@@ -120,23 +134,42 @@ class BLHAOSMediaPlayer(MediaPlayerEntity):
     @callback
     def _async_speaker_updated(self, address: str) -> None:
         if address == self._address:
+            _LOGGER.debug(
+                "Entity %s (%s) updating state: state=%s, volume=%s, available=%s",
+                self.entity_id,
+                self._address,
+                self.state,
+                self.volume_level,
+                self.available,
+            )
             self.async_write_ha_state()
 
-    async def async_media_play(self) -> None:
+    async def _async_command(self, operation: str, **kwargs) -> None:
+        _LOGGER.debug("Entity %s executing command: %s (kwargs: %s)", self.entity_id, operation, kwargs)
         try:
-            await self._client.async_command(self._address, "play")
+            await self._client.async_command(self._address, operation, **kwargs)
+            _LOGGER.debug("Entity %s command %s completed successfully", self.entity_id, operation)
         except aiohttp.ClientError as error:
-            if str(error) != "No active playback to resume":
-                raise
+            if operation == "play" and str(error) == "No active playback to resume":
+                _LOGGER.debug("Entity %s ignore 'No active playback to resume'", self.entity_id)
+                return
+            _LOGGER.debug("Entity %s command %s failed: %s", self.entity_id, operation, error)
+            raise HomeAssistantError(f"Failed to {operation}: {error}") from error
+        except TimeoutError as error:
+            _LOGGER.debug("Entity %s command %s timed out", self.entity_id, operation)
+            raise HomeAssistantError(f"Timeout communicating with speaker during {operation}") from error
+
+    async def async_media_play(self) -> None:
+        await self._async_command("play")
 
     async def async_media_pause(self) -> None:
-        await self._client.async_command(self._address, "pause")
+        await self._async_command("pause")
 
     async def async_media_stop(self) -> None:
-        await self._client.async_command(self._address, "stop")
+        await self._async_command("stop")
 
     async def async_set_volume_level(self, volume: float) -> None:
-        await self._client.async_command(self._address, "set_volume", volume=volume)
+        await self._async_command("set_volume", volume=volume)
 
     async def async_play_media(self, media_type: str, media_id: str, **kwargs) -> None:
         """Resolve Home Assistant sources to an add-on-reachable media URL."""
@@ -151,10 +184,23 @@ class BLHAOSMediaPlayer(MediaPlayerEntity):
             url = f"{get_url(self.hass)}{url}"
         if media_type and not media_type.startswith("audio/"):
             media_type = None
-        await self._client.async_command(self._address, "play_media", url=url, media_type=media_type)
+        _LOGGER.debug(
+            "Entity %s resolving play_media: original_type=%s -> final_type=%s, url=%s",
+            self.entity_id,
+            kwargs.get("media_type"),
+            media_type,
+            url,
+        )
+        await self._async_command("play_media", url=url, media_type=media_type)
 
     async def async_browse_media(
         self, media_content_type: str | None = None, media_content_id: str | None = None
     ) -> BrowseMedia:
         """Let the Home Assistant UI browse folders/media sources for this speaker."""
+        _LOGGER.debug(
+            "Entity %s browsing media: type=%s, id=%s",
+            self.entity_id,
+            media_content_type,
+            media_content_id,
+        )
         return await async_browse_media(self.hass, media_content_id)
