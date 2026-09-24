@@ -44,7 +44,7 @@ class FakeResponse:
     async def __aexit__(self, *args: Any) -> None:
         return None
 
-    async def json(self) -> dict[str, Any]:
+    async def json(self, content_type: str | None = None) -> dict[str, Any]:
         return self._payload
 
 

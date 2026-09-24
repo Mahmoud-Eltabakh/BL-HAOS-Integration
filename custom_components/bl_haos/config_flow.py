@@ -31,15 +31,15 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     @staticmethod
     def _validate_endpoint(endpoint: str) -> str | None:
-        """Allow only a plain HTTP endpoint on the local network."""
+        """Normalize a local HTTP(S) endpoint to scheme://host:port."""
         endpoint = str(endpoint or "").strip()
         if not endpoint:
             return None
-        if not endpoint.startswith("http://") and not endpoint.startswith("https://"):
+        if not endpoint.startswith(("http://", "https://")):
             endpoint = f"http://{endpoint}"
         parsed = urlsplit(endpoint)
         if (
-            parsed.scheme != "http"
+            parsed.scheme not in ("http", "https")
             or not parsed.hostname
             or parsed.username
             or parsed.password
@@ -50,8 +50,9 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return None
         hostname = parsed.hostname.lower()
         port = parsed.port or 8099
-        netloc = f"{hostname}:{port}"
-        return f"http://{netloc}"
+        # IPv6 literals must stay bracketed in the reconstructed netloc.
+        host_part = f"[{hostname}]" if ":" in hostname else hostname
+        return f"{parsed.scheme}://{host_part}:{port}"
 
     @staticmethod
     def _endpoint_from_hassio_slug(slug: str) -> str | None:
@@ -70,8 +71,12 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     headers={"Authorization": f"Bearer {token}"},
                     timeout=aiohttp.ClientTimeout(total=5),
                 ) as response:
-                    payload = await response.json()
-                    if response.status == 200 and payload.get("bridge_id") == BRIDGE_ID:
+                    payload = await response.json(content_type=None)
+                    if (
+                        response.status == 200
+                        and isinstance(payload, dict)
+                        and payload.get("bridge_id") == BRIDGE_ID
+                    ):
                         _LOGGER.debug(
                             "Bridge identity verified at %s (bridge_id=%s, version=%s)",
                             target,
@@ -85,7 +90,7 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         response.status,
                         payload,
                     )
-            except (aiohttp.ClientError, TimeoutError, ValueError) as err:
+            except (AttributeError, TypeError, ValueError, aiohttp.ClientError, TimeoutError) as err:
                 _LOGGER.debug("Bridge validation attempt failed for %s: %s", target, err)
                 continue
         return False

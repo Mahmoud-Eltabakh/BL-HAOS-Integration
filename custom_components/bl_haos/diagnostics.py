@@ -28,6 +28,7 @@ async def async_get_config_entry_diagnostics(
     payload = {
         "contract_version": 1,
         "health_status": "healthy" if client.transport_available else "unavailable",
+        "auth_failed": client.auth_failed,
         "entry": {
             "entry_id": entry.entry_id,
             "endpoint_configured": bool(entry.data.get(CONF_ENDPOINT)),

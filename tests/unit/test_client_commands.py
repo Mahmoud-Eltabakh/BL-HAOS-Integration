@@ -127,3 +127,80 @@ async def test_malformed_snapshot_is_rejected_unit():
 
     with pytest.raises(ValueError, match="Invalid BL-HAOS speakers snapshot"):
         await client._async_refresh_snapshot(session)
+
+
+async def test_command_ack_rejected_record_raises_clean_error():
+    """Regression (C1): a 200 ack whose record fails the sink filter must not KeyError."""
+    session = FakeSession(load_snapshot("speakers_initial.json"))
+    client, _ = _client(session)
+    # Ack for a disconnected, untrusted, non-sink record (mid-command disconnect).
+    session.command_response = {
+        "address": "aa:bb:cc:dd:ee:01",
+        "name": "Kitchen Speaker",
+        "available": False,
+        "connected": False,
+        "trusted": False,
+        "is_audio_sink": False,
+    }
+
+    with pytest.raises(aiohttp.ClientError, match="no longer a trusted audio sink"):
+        await client.async_command("aa:bb:cc:dd:ee:01", "pause")
+
+
+async def test_command_401_surfaces_authentication_error():
+    """Regression (H2): token rejection must be recognizable for reauth handling."""
+    session = FakeSession(load_snapshot("speakers_initial.json"))
+    client, _ = _client(session)
+    session.command_response = {"detail": "Native bridge authentication required"}
+    session.command_status = 401
+
+    with pytest.raises(aiohttp.ClientError, match="authentication failed"):
+        await client.async_command("aa:bb:cc:dd:ee:01", "pause")
+    assert client.auth_failed is False  # only the listener parks the transport
+
+
+async def test_identity_non_dict_body_raises_clean_error():
+    """Regression (C2/M7): a proxy error page on /identity must not AttributeError."""
+    session = FakeSession(load_snapshot("speakers_initial.json"))
+    client, _ = _client(session)
+    session.identity = ["unexpected"]
+
+    with pytest.raises(aiohttp.ClientError, match="Unexpected BL-HAOS native bridge identity"):
+        await client.async_initialize()
+
+
+async def test_snapshot_non_dict_body_raises_clean_error():
+    session = FakeSession(load_snapshot("speakers_initial.json"))
+    client, _ = _client(session)
+    session.speakers = {"speakers": {}}  # valid container
+    # Simulate the speakers endpoint returning a list body via a bogus shape.
+    session.speakers = ["unexpected"]
+
+    with pytest.raises(ValueError, match="Invalid BL-HAOS speakers snapshot"):
+        await client._async_refresh_snapshot(session)
+
+
+async def test_listener_evicts_rejected_live_event():
+    """Regression (M1): a live event that rejects the record must evict the cache."""
+    session = FakeSession(load_snapshot("speakers_initial.json"))
+    client, _ = _client(session)
+    await client._async_refresh_snapshot(session)
+    assert "aa:bb:cc:dd:ee:01" in client.speakers
+
+    rejected = {**load_snapshot("speakers_initial.json")["speakers"]["aa:bb:cc:dd:ee:01"], "is_audio_sink": False}
+    client._async_evict_if_rejected(rejected, None)
+
+    assert "aa:bb:cc:dd:ee:01" not in client.speakers
+
+
+async def test_listener_keeps_accepted_live_event():
+    session = FakeSession(load_snapshot("speakers_initial.json"))
+    client, _ = _client(session)
+    await client._async_refresh_snapshot(session)
+
+    accepted = load_snapshot("speakers_initial.json")["speakers"]["aa:bb:cc:dd:ee:01"]
+    address = client._async_process_speaker(accepted)
+    client._async_evict_if_rejected(accepted, address)
+
+    assert "aa:bb:cc:dd:ee:01" in client.speakers
+

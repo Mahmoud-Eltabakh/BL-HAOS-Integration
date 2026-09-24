@@ -44,19 +44,37 @@ class BLHAOSClient:
         self._websocket_task: asyncio.Task[None] | None = None
         self._closed = False
         self.transport_available = False
+        self.auth_failed = False
 
     @property
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self.token}"}
+
+    @staticmethod
+    def _response_error(status: int, body: Any, fallback: str) -> aiohttp.ClientError:
+        """Build a transport error from an HTTP response without assuming a dict body.
+
+        Proxies, gateways, and error pages can return any content type; a bare
+        ``body.get(...)`` on a non-dict payload raises AttributeError and masks
+        the real HTTP failure.
+        """
+        if isinstance(body, dict):
+            detail = body.get("detail") or body.get("error") or fallback
+            if body.get("error_code") == "invalid_token" or status in (401, 403):
+                return aiohttp.ClientError(f"BL-HAOS authentication failed (HTTP {status}): {detail}")
+            return aiohttp.ClientError(detail if isinstance(detail, str) else fallback)
+        return aiohttp.ClientError(fallback)
 
     async def async_initialize(self) -> None:
         """Validate identity, cache the snapshot, and start event updates."""
         _LOGGER.debug("Initializing BL-HAOS client at %s", self.endpoint)
         session = async_get_clientsession(self.hass)
         async with session.get(f"{self.endpoint}{NATIVE_API_PATH}/identity", headers=self._headers) as response:
-            identity = await response.json()
-            if response.status != 200 or identity.get("bridge_id") != BRIDGE_ID:
-                raise aiohttp.ClientError("Unexpected BL-HAOS native bridge identity")
+            identity = await response.json(content_type=None)
+            if response.status != 200 or not isinstance(identity, dict) or identity.get("bridge_id") != BRIDGE_ID:
+                raise self._response_error(
+                    response.status, identity, "Unexpected BL-HAOS native bridge identity"
+                )
         _LOGGER.debug("BL-HAOS native bridge identity verified: %s", identity)
         await self._async_refresh_snapshot(session)
         self.transport_available = True
@@ -74,9 +92,9 @@ class BLHAOSClient:
     async def _async_refresh_snapshot(self, session: aiohttp.ClientSession) -> None:
         _LOGGER.debug("Refreshing speakers snapshot from %s%s", self.endpoint, NATIVE_API_PATH)
         async with session.get(f"{self.endpoint}{NATIVE_API_PATH}/speakers", headers=self._headers) as response:
-            payload = await response.json()
+            payload = await response.json(content_type=None)
             if response.status != 200:
-                raise aiohttp.ClientError("Unable to load BL-HAOS speakers")
+                raise self._response_error(response.status, payload, "Unable to load BL-HAOS speakers")
         if not isinstance(payload, dict) or not isinstance(payload.get("speakers"), dict):
             raise ValueError("Invalid BL-HAOS speakers snapshot")
         snapshot_addresses: set[str] = set()
@@ -112,7 +130,7 @@ class BLHAOSClient:
             json=payload,
             timeout=_COMMAND_TIMEOUT,
         ) as response:
-            body = await response.json()
+            body = await response.json(content_type=None)
             if response.status != 200:
                 _LOGGER.warning(
                     "Command '%s' to %s failed (HTTP %s) after %.1fs: %s",
@@ -122,9 +140,15 @@ class BLHAOSClient:
                     monotonic() - started,
                     body.get("detail", "unknown error") if isinstance(body, dict) else "invalid response",
                 )
-                raise aiohttp.ClientError(body.get("detail", "BL-HAOS command failed"))
+                raise self._response_error(response.status, body, "BL-HAOS command failed")
         _LOGGER.info("Command '%s' to %s completed in %.1fs", operation, log_address, monotonic() - started)
         self._async_process_speaker(body)
+        if normalized not in self.speakers:
+            # The bridge ack rejected the record (e.g. the speaker dropped its
+            # connection mid-command, so it no longer passes the trusted-sink
+            # filter). Surface that as a clean transport error instead of a
+            # bare KeyError from the cache lookup.
+            raise aiohttp.ClientError("Speaker is no longer a trusted audio sink")
         return self.speakers[normalized]
 
     def async_add_listener(self, listener: Callable[[str], None]) -> Callable[[], None]:
@@ -177,6 +201,7 @@ class BLHAOSClient:
                 _LOGGER.debug("Connecting to native WebSocket event stream at %s", websocket_url)
                 async with session.ws_connect(websocket_url, headers=self._headers, heartbeat=30) as websocket:
                     delay = 1
+                    self.auth_failed = False
                     _LOGGER.debug("Native WebSocket event stream connected successfully")
                     await self._async_refresh_snapshot(session)
                     self._set_transport_available(True)
@@ -187,15 +212,39 @@ class BLHAOSClient:
                                 raise ValueError("Invalid BL-HAOS native event")
                             if payload.get("event") == "speaker_updated":
                                 _LOGGER.debug("Received native speaker update event: %s", payload)
-                                self._async_process_speaker(payload.get("data"))
+                                address = self._async_process_speaker(payload.get("data"))
+                                self._async_evict_if_rejected(payload.get("data"), address)
             except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as err:
                 _LOGGER.warning("BL-HAOS native event stream disconnected: %s", err)
                 self._set_transport_available(False)
+                if "authentication failed" in str(err).lower():
+                    # Rotated/invalid token: retrying with the same credential
+                    # only hammers the bridge; park the transport so entities
+                    # report unavailable and diagnostics can show the cause.
+                    self.auth_failed = True
+                    _LOGGER.error("BL-HAOS credential rejected; stop retrying until the entry is reloaded")
+                    return
             if self._closed:
                 return
             _LOGGER.debug("Scheduling native WebSocket reconnect in %ds...", delay)
             await asyncio.sleep(delay)
             delay = min(delay * 2, 30)
+
+    def _async_evict_if_rejected(self, speaker: Any, processed_address: str | None) -> None:
+        """Drop a cached speaker when a live event rejects its record.
+
+        Snapshot refresh already evicts; this covers events so a speaker that
+        turns non-sink/untrusted does not linger until the next reconnect.
+        """
+        if processed_address is not None or not isinstance(speaker, dict):
+            return
+        address = normalize_address(str(speaker.get("address", "")))
+        if address is None or address not in self.speakers:
+            return
+        _LOGGER.debug("Evicting speaker %s (live event no longer matches the trusted-sink filter)", address)
+        del self.speakers[address]
+        for listener in tuple(self._update_listeners):
+            listener(address)
 
     def _set_transport_available(self, available: bool) -> None:
         if self.transport_available == available:

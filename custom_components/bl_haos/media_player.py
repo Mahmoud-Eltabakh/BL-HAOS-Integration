@@ -110,7 +110,9 @@ class BLHAOSMediaPlayer(MediaPlayerEntity):
         """Return the state of the device."""
         if not self._speaker.get("connected"):
             return MediaPlayerState.OFF
-        return self._speaker.get("playback", {}).get("state", MediaPlayerState.IDLE)
+        bridge_state = self._speaker.get("playback", {}).get("state", MediaPlayerState.IDLE)
+        valid_states = {MediaPlayerState.IDLE, MediaPlayerState.PLAYING, MediaPlayerState.PAUSED}
+        return bridge_state if bridge_state in valid_states else MediaPlayerState.IDLE
 
     @property
     def volume_level(self) -> float | None:
@@ -154,9 +156,18 @@ class BLHAOSMediaPlayer(MediaPlayerEntity):
             await self._client.async_command(self._address, operation, **kwargs)
             _LOGGER.debug("Entity %s command %s completed successfully", self.entity_id, operation)
         except aiohttp.ClientError as error:
-            if operation == "play" and str(error) == "No active playback to resume":
+            message = str(error)
+            if operation == "play" and "No active playback to resume" in message:
                 _LOGGER.debug("Entity %s ignore 'No active playback to resume'", self.entity_id)
                 return
+            if "authentication failed" in message.lower():
+                raise HomeAssistantError(
+                    "BL-HAOS rejected the configured token; reload the integration entry to retry"
+                ) from error
+            if "no longer a trusted audio sink" in message:
+                raise HomeAssistantError(
+                    "Speaker disconnected while the command was in flight"
+                ) from error
             _LOGGER.debug("Entity %s command %s failed: %s", self.entity_id, operation, error)
             raise HomeAssistantError(f"Failed to {operation}: {error}") from error
         except TimeoutError as error:
@@ -178,14 +189,21 @@ class BLHAOSMediaPlayer(MediaPlayerEntity):
     async def async_play_media(self, media_type: str, media_id: str, **kwargs) -> None:
         """Resolve Home Assistant sources to an add-on-reachable media URL."""
         if kwargs.get("enqueue"):
-            raise ValueError("BL-HAOS does not support queued playback")
+            raise HomeAssistantError("BL-HAOS does not support queued playback")
         if is_media_source_id(media_id):
             media = await async_resolve_media(self.hass, media_id, self.entity_id)
             media_id = media.url
             media_type = media.mime_type or media_type
         url = async_process_play_media_url(self.hass, media_id)
         if url.startswith("/"):
-            url = f"{get_url(self.hass)}{url}"
+            base_url = get_url(self.hass, prefer_external_url=False, allow_cloud=False)
+            if not base_url:
+                raise HomeAssistantError(
+                    "Home Assistant has no configured internal or external URL;"
+                    " set one under Settings > System > Network so local media"
+                    " can be resolved for the BL-HAOS add-on"
+                )
+            url = f"{base_url}{url}"
         if media_type and not media_type.startswith("audio/"):
             media_type = None
         _LOGGER.debug(

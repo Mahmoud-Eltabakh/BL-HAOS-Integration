@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
-from homeassistant.helpers import entity_registry as er
 import logging
 
 from .client import BLHAOSClient
@@ -61,9 +60,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
         await entry.runtime_data.client.async_close()
-        registry = er.async_get(hass)
-        for entity in er.async_entries_for_config_entry(registry, entry.entry_id):
-            hass.states.async_remove(entity.entity_id)
         _LOGGER.debug("BL-HAOS config entry %s unloaded successfully", entry.entry_id)
     else:
         _LOGGER.debug("BL-HAOS config entry %s unload returned False", entry.entry_id)
