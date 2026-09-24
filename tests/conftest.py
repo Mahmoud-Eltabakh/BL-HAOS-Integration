@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -13,13 +15,29 @@ import pytest
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
 
 
+def pytest_ignore_collect(collection_path: Path, config) -> bool | None:
+    """Skip Home Assistant SIL tests where the HA runtime cannot import.
+
+    Home Assistant Core imports Unix-only modules (fcntl) at import time, so the
+    SIL suite can only run on Linux (CI or WSL2). Developers can override with
+    BLHAOS_RUN_SIL=1 when running inside such an environment. The package-layout
+    and unit tests always run everywhere.
+    """
+    if collection_path.name != "test_ha_integration_sil.py":
+        return None
+    if sys.platform != "win32":
+        return None
+    if os.environ.get("BLHAOS_RUN_SIL") == "1":
+        return None
+    return True
+
+
 class FakeResponse:
     """Minimal aiohttp response context manager for the native client."""
 
     def __init__(self, payload: dict[str, Any], status: int = 200) -> None:
         self.status = status
         self._payload = payload
-
     async def __aenter__(self) -> "FakeResponse":
         return self
 
@@ -63,6 +81,9 @@ class FakeSession:
         self.websocket_available = True
         self.websocket_messages: list[Any] = []
         self.last_ws_url: str | None = None
+        self.commands: list[tuple[str, dict[str, Any]]] = []
+        self.command_response: dict[str, Any] | Exception | tuple[dict[str, Any], int] = {}
+        self.command_status: int = 200
 
     def get(self, url: str, **kwargs: Any) -> FakeResponse:
         if url.endswith("/identity"):
@@ -72,7 +93,16 @@ class FakeSession:
         raise AssertionError(f"Unexpected SIL GET: {url}")
 
     def post(self, url: str, **kwargs: Any) -> FakeResponse:
-        raise AssertionError(f"Unexpected SIL POST: {url}")
+        """Record the command payload and reply with the configured response."""
+        payload = kwargs.get("json")
+        self.commands.append((url, payload if isinstance(payload, dict) else {}))
+        response = self.command_response
+        if isinstance(response, Exception):
+            raise response
+        if isinstance(response, tuple):
+            body, status = response
+            return FakeResponse(body, status=status)
+        return FakeResponse(response, status=self.command_status)
 
     def ws_connect(self, url: str, **kwargs: Any) -> FakeWebSocket:
         self.last_ws_url = url

@@ -1,0 +1,7 @@
+# Home Assistant integration SIL test dependencies (Linux CI / WSL2 only).
+# Pinned per .planning/todos/pending/add-linux-ha-sil-ci.md; upgrade procedure
+# is documented in TESTING.md.
+pytest-homeassistant-custom-component==0.13.366
+homeassistant==2026.9.3
+aiohttp==3.14.3
+pytest==9.0.3
