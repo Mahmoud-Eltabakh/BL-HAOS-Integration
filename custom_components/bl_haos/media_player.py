@@ -11,6 +11,7 @@ from homeassistant.components.media_player import (
     MediaPlayerDeviceClass,
     MediaPlayerEntity,
     MediaPlayerEntityFeature,
+    MediaPlayerState,
     async_process_play_media_url,
 )
 from homeassistant.components.media_source import (
@@ -102,11 +103,15 @@ class BLHAOSMediaPlayer(MediaPlayerEntity):
 
     @property
     def available(self) -> bool:
-        return self._client.transport_available and bool(self._speaker.get("available"))
+        """Entity is available as long as the native bridge transport is alive."""
+        return self._client.transport_available
 
     @property
     def state(self):
-        return self._speaker.get("playback", {}).get("state", "idle")
+        """Return the state of the device."""
+        if not self._speaker.get("connected"):
+            return MediaPlayerState.OFF
+        return self._speaker.get("playback", {}).get("state", MediaPlayerState.IDLE)
 
     @property
     def volume_level(self) -> float | None:
