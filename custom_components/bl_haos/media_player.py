@@ -20,6 +20,7 @@ from homeassistant.components.media_source import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.network import get_url
 
 from .client import BLHAOSClient, normalize_address
 from .const import DOMAIN
@@ -146,6 +147,10 @@ class BLHAOSMediaPlayer(MediaPlayerEntity):
             media_id = media.url
             media_type = media.mime_type or media_type
         url = async_process_play_media_url(self.hass, media_id)
+        if url.startswith("/"):
+            url = f"{get_url(self.hass)}{url}"
+        if media_type and not media_type.startswith("audio/"):
+            media_type = None
         await self._client.async_command(self._address, "play_media", url=url, media_type=media_type)
 
     async def async_browse_media(
