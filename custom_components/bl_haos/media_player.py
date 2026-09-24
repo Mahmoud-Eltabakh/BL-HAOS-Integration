@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-import logging
 
 import aiohttp
 from homeassistant.components.media_player import (
@@ -26,9 +25,9 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.network import get_url
 
 from .client import BLHAOSClient, normalize_address
-from .const import DOMAIN
+from .const import DOMAIN, get_logger
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = get_logger(__name__)
 
 
 async def async_setup_entry(

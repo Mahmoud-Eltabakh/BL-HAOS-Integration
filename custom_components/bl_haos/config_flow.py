@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from urllib.parse import urlsplit
 
 import aiohttp
@@ -10,9 +9,19 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import BRIDGE_ID, BRIDGE_UNIQUE_ID, CONF_ENDPOINT, CONF_TOKEN, DOMAIN, NATIVE_API_PATH
+from .const import (
+    BRIDGE_ID,
+    BRIDGE_UNIQUE_ID,
+    CONF_ENDPOINT,
+    CONF_LOG_LEVEL,
+    CONF_TOKEN,
+    DOMAIN,
+    NATIVE_API_PATH,
+    get_logger,
+    normalize_log_level,
+)
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = get_logger(__name__)
 
 
 class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -119,12 +128,13 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         await self.async_set_unique_id(BRIDGE_UNIQUE_ID)
         self._discovered_endpoint = endpoint
         self._discovered_token = str((discovery_info.config or {}).get("token", "")).strip()
+        self._discovered_log_level = normalize_log_level((discovery_info.config or {}).get(CONF_LOG_LEVEL))
         self.context["title_placeholders"] = {"name": discovery_info.name}
         connection_valid = bool(self._discovered_token) and await self._async_validate_connection(
             endpoint, self._discovered_token
         )
         _LOGGER.debug("Hass.io discovery validation result: connection_valid=%s", connection_valid)
-        updates = {CONF_ENDPOINT: endpoint}
+        updates = {CONF_ENDPOINT: endpoint, CONF_LOG_LEVEL: self._discovered_log_level}
         if connection_valid:
             updates[CONF_TOKEN] = self._discovered_token
         existing_entry = next(
@@ -144,7 +154,11 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             _LOGGER.debug("Creating entry from validated Hass.io discovery: %s", endpoint)
             return self.async_create_entry(
                 title="BL-HAOS Bluetooth Audio",
-                data={CONF_ENDPOINT: endpoint, CONF_TOKEN: self._discovered_token},
+                data={
+                    CONF_ENDPOINT: endpoint,
+                    CONF_TOKEN: self._discovered_token,
+                    CONF_LOG_LEVEL: self._discovered_log_level,
+                },
             )
         return await self.async_step_hassio_confirm()
 
@@ -162,5 +176,9 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         _LOGGER.debug("Hass.io confirm succeeded, creating config entry for %s", self._discovered_endpoint)
         return self.async_create_entry(
             title="BL-HAOS Bluetooth Audio",
-            data={CONF_ENDPOINT: self._discovered_endpoint, CONF_TOKEN: user_input[CONF_TOKEN]},
+            data={
+                CONF_ENDPOINT: self._discovered_endpoint,
+                CONF_TOKEN: user_input[CONF_TOKEN],
+                CONF_LOG_LEVEL: self._discovered_log_level,
+            },
         )

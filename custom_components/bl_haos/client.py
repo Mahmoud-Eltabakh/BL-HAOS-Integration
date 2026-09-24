@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from time import monotonic
 from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
@@ -18,6 +19,11 @@ from .const import BRIDGE_ID, NATIVE_API_PATH
 _MAC_ADDRESS = re.compile(r"^[0-9a-f]{2}(?::[0-9a-f]{2}){5}$")
 _COMMAND_TIMEOUT = aiohttp.ClientTimeout(total=30)
 _LOGGER = logging.getLogger(__name__)
+
+
+def _redacted_address(address: str) -> str:
+    """Keep logs useful without recording a complete Bluetooth address."""
+    return f"...:{address[-5:]}"
 
 
 def normalize_address(address: str) -> str | None:
@@ -96,7 +102,9 @@ class BLHAOSClient:
         if normalized is None:
             raise aiohttp.ClientError("Invalid Bluetooth address")
         payload = {"version": 1, "operation": operation, **{key: value for key, value in options.items() if value is not None}}
-        _LOGGER.debug("Sending command '%s' to %s with payload %s", operation, normalized, payload)
+        log_address = _redacted_address(normalized)
+        started = monotonic()
+        _LOGGER.debug("Sending command '%s' to %s", operation, log_address)
         session = async_get_clientsession(self.hass)
         async with session.post(
             f"{self.endpoint}{NATIVE_API_PATH}/speakers/{normalized}/command",
@@ -106,9 +114,16 @@ class BLHAOSClient:
         ) as response:
             body = await response.json()
             if response.status != 200:
-                _LOGGER.debug("Command '%s' to %s failed (HTTP %s): %s", operation, normalized, response.status, body)
+                _LOGGER.warning(
+                    "Command '%s' to %s failed (HTTP %s) after %.1fs: %s",
+                    operation,
+                    log_address,
+                    response.status,
+                    monotonic() - started,
+                    body.get("detail", "unknown error") if isinstance(body, dict) else "invalid response",
+                )
                 raise aiohttp.ClientError(body.get("detail", "BL-HAOS command failed"))
-        _LOGGER.debug("Command '%s' to %s completed successfully: %s", operation, normalized, body)
+        _LOGGER.info("Command '%s' to %s completed in %.1fs", operation, log_address, monotonic() - started)
         self._async_process_speaker(body)
         return self.speakers[normalized]
 
@@ -174,7 +189,7 @@ class BLHAOSClient:
                                 _LOGGER.debug("Received native speaker update event: %s", payload)
                                 self._async_process_speaker(payload.get("data"))
             except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as err:
-                _LOGGER.debug("Disconnected from native event stream: %s", err)
+                _LOGGER.warning("BL-HAOS native event stream disconnected: %s", err)
                 self._set_transport_available(False)
             if self._closed:
                 return

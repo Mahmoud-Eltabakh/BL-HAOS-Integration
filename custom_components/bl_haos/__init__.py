@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import entity_registry as er
+import logging
 
 from .client import BLHAOSClient
-from .const import CONF_ENDPOINT, CONF_TOKEN, DOMAIN, PLATFORMS
+from .const import CONF_ENDPOINT, CONF_LOG_LEVEL, CONF_TOKEN, DOMAIN, INTEGRATION_LOGGER, PLATFORMS, get_logger, normalize_log_level
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = get_logger(__name__)
 
 
 @dataclass
@@ -25,10 +25,13 @@ class BLHAOSRuntime:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up BL-HAOS from a config entry."""
+    effective_log_level = normalize_log_level(entry.data.get(CONF_LOG_LEVEL))
+    logging.getLogger(INTEGRATION_LOGGER).setLevel(effective_log_level.upper())
     _LOGGER.debug(
-        "Setting up BL-HAOS config entry %s (endpoint: %s)",
+        "Setting up BL-HAOS config entry %s (endpoint: %s, log_level: %s)",
         entry.entry_id,
         entry.data.get(CONF_ENDPOINT),
+        effective_log_level,
     )
     client = BLHAOSClient(hass, entry.data[CONF_ENDPOINT], entry.data[CONF_TOKEN])
     try:

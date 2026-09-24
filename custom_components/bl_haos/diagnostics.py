@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.redact import async_redact_data
 
-from .const import CONF_ENDPOINT
+from .const import CONF_ENDPOINT, get_logger
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = get_logger(__name__)
 
 
 async def async_get_config_entry_diagnostics(

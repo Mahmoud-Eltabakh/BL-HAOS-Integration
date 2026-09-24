@@ -12,7 +12,7 @@ from homeassistant import config_entries
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.bl_haos.const import CONF_ENDPOINT, CONF_TOKEN, DOMAIN
+from custom_components.bl_haos.const import CONF_ENDPOINT, CONF_LOG_LEVEL, CONF_TOKEN, DOMAIN
 from custom_components.bl_haos.client import BLHAOSClient
 from custom_components.bl_haos.diagnostics import async_get_config_entry_diagnostics
 
@@ -125,14 +125,18 @@ async def test_hassio_discovery_with_token_auto_creates_entry(hass, bridge_sessi
     bridge_session.identity = {"bridge_id": "bl_haos_native_bridge", "version": 1}
     client_patch, flow_patch = _patch_session(bridge_session)
     discovery_info = HassioServiceInfo(
-        config={"token": TOKEN}, name="BL-HAOS", slug="c839f4a9_bl_haos", uuid="uuid"
+        config={"token": TOKEN, CONF_LOG_LEVEL: "debug"}, name="BL-HAOS", slug="c839f4a9_bl_haos", uuid="uuid"
     )
     with client_patch, flow_patch:
         result = await hass.config_entries.flow.async_init(
             DOMAIN, context={"source": config_entries.SOURCE_HASSIO}, data=discovery_info
         )
     assert result["type"] == "create_entry"
-    assert result["data"] == {CONF_ENDPOINT: "http://c839f4a9-bl-haos:8099", CONF_TOKEN: TOKEN}
+    assert result["data"] == {
+        CONF_ENDPOINT: "http://c839f4a9-bl-haos:8099",
+        CONF_TOKEN: TOKEN,
+        CONF_LOG_LEVEL: "debug",
+    }
 
 
 async def test_hassio_discovery_refreshes_existing_entry_credentials(hass, bridge_session):
@@ -146,7 +150,7 @@ async def test_hassio_discovery_refreshes_existing_entry_credentials(hass, bridg
     )
     entry.add_to_hass(hass)
     discovery_info = HassioServiceInfo(
-        config={"token": TOKEN}, name="BL-HAOS", slug="c839f4a9_bl_haos", uuid="uuid"
+        config={"token": TOKEN, CONF_LOG_LEVEL: "debug"}, name="BL-HAOS", slug="c839f4a9_bl_haos", uuid="uuid"
     )
     client_patch, flow_patch = _patch_session(bridge_session)
 
@@ -161,6 +165,7 @@ async def test_hassio_discovery_refreshes_existing_entry_credentials(hass, bridg
     assert updated_entry.data == {
         CONF_ENDPOINT: "http://c839f4a9-bl-haos:8099",
         CONF_TOKEN: TOKEN,
+        CONF_LOG_LEVEL: "debug",
     }
 
 
@@ -179,7 +184,11 @@ async def test_hassio_discovery_without_token_falls_back_to_manual_prompt(hass, 
             result["flow_id"], user_input={CONF_TOKEN: TOKEN}
         )
     assert result["type"] == "create_entry"
-    assert result["data"] == {CONF_ENDPOINT: "http://c839f4a9-bl-haos:8099", CONF_TOKEN: TOKEN}
+    assert result["data"] == {
+        CONF_ENDPOINT: "http://c839f4a9-bl-haos:8099",
+        CONF_TOKEN: TOKEN,
+        CONF_LOG_LEVEL: "info",
+    }
 
 
 async def test_websocket_failure_marks_transport_unavailable(hass, bridge_session):
