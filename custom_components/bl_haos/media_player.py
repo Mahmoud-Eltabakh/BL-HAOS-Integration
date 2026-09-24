@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 
 import aiohttp
@@ -28,6 +29,22 @@ from .client import BLHAOSClient, normalize_address
 from .const import DOMAIN, get_logger
 
 _LOGGER = get_logger(__name__)
+
+# Home Assistant content types ("music", "video", "audio/mpeg", "channel") and
+# MIME types both fit this bounded, structurally safe token shape. The value is
+# only informational for the bridge — ffmpeg sniffs the real stream — so pass it
+# through and drop anything that does not fit instead of failing playback.
+_MEDIA_TYPE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*(?:/[A-Za-z0-9!#$&^_.+-]+)?$")
+
+
+def _normalize_media_type(media_type: str | None) -> str | None:
+    """Return a safe media-type token for the bridge, or None when unusable."""
+    if not media_type or not isinstance(media_type, str):
+        return None
+    candidate = media_type.strip()
+    if not candidate or len(candidate) > 128 or not _MEDIA_TYPE_PATTERN.fullmatch(candidate):
+        return None
+    return candidate.lower()
 
 
 async def async_setup_entry(
@@ -204,8 +221,7 @@ class BLHAOSMediaPlayer(MediaPlayerEntity):
                     " can be resolved for the BL-HAOS add-on"
                 )
             url = f"{base_url}{url}"
-        if media_type and not media_type.startswith("audio/"):
-            media_type = None
+        media_type = _normalize_media_type(media_type)
         _LOGGER.debug(
             "Entity %s resolving play_media: original_type=%s -> final_type=%s, url=%s",
             self.entity_id,
