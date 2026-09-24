@@ -255,7 +255,7 @@ async def test_snapshot_eviction_removes_rejected_speaker(hass, bridge_session):
     client = BLHAOSClient(hass, ENDPOINT, TOKEN)
     await client._async_refresh_snapshot(bridge_session)
 
-    bridge_session.speakers["aa:bb:cc:dd:ee:01"]["is_audio_sink"] = False
+    bridge_session.speakers["speakers"]["aa:bb:cc:dd:ee:01"]["is_audio_sink"] = False
     await client._async_refresh_snapshot(bridge_session)
 
     assert "aa:bb:cc:dd:ee:01" not in client.speakers
