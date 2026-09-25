@@ -17,7 +17,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .const import BRIDGE_ID, NATIVE_API_PATH
 
 _MAC_ADDRESS = re.compile(r"^[0-9a-f]{2}(?::[0-9a-f]{2}){5}$")
-_COMMAND_TIMEOUT = aiohttp.ClientTimeout(total=30)
+_COMMAND_TIMEOUT = aiohttp.ClientTimeout(total=60)
 _LOGGER = logging.getLogger(__name__)
 
 
