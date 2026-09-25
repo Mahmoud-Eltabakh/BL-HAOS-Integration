@@ -34,6 +34,7 @@ from .const import (
     COMMAND_PLAY_MEDIA,
     COMMAND_SET_VOLUME,
     COMMAND_STOP,
+    CONNECTION_DROPPED_MARKER,
     DEVICE_MODEL,
     DOMAIN,
     MANUFACTURER,
@@ -243,6 +244,11 @@ class BLHAOSMediaPlayer(MediaPlayerEntity):
             if AUTH_FAILURE_MARKER in message.lower():
                 raise HomeAssistantError(
                     "BL-HAOS rejected the configured token; reload the integration entry to retry"
+                ) from error
+            if CONNECTION_DROPPED_MARKER in message:
+                raise HomeAssistantError(
+                    "The BL-HAOS add-on closed the connection while handling the command"
+                    " (it may be restarting or updating); try the action again"
                 ) from error
             if UNTRUSTED_SINK_MARKER in message:
                 raise HomeAssistantError(

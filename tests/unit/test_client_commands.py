@@ -20,6 +20,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from custom_components.bl_haos.client import BLHAOSClient  # noqa: E402
+from custom_components.bl_haos.const import CONNECTION_DROPPED_MARKER  # noqa: E402
 from tests.conftest import FakeSession, load_snapshot  # noqa: E402
 
 ENDPOINT = "http://bl-haos:8099"
@@ -203,4 +204,55 @@ async def test_listener_keeps_accepted_live_event():
     client._async_evict_if_rejected(accepted, address)
 
     assert "aa:bb:cc:dd:ee:01" in client.speakers
+
+
+async def test_command_retries_once_when_the_bridge_closes_the_connection():
+    """A pooled socket the add-on closed must not fail the user's action.
+
+    The daemon drops idle keep-alive connections; a command written to one of
+    those sockets raised ServerDisconnectedError, which surfaced in Home
+    Assistant as "Failed to play_media: Server disconnected".
+    """
+    snapshot = load_snapshot("speakers_initial.json")
+    session = FakeSession(snapshot)
+    client, _ = _client(session)
+    session.command_response = snapshot["speakers"]["aa:bb:cc:dd:ee:01"]
+    attempts = {"count": 0}
+    served_post = session.post
+
+    def drop_first_connection(url, **kwargs):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise aiohttp.ServerDisconnectedError()
+        return served_post(url, **kwargs)
+
+    session.post = drop_first_connection  # type: ignore[assignment]
+
+    record = await client.async_command("aa:bb:cc:dd:ee:01", "play_media", url="https://example.test/a.mp3")
+
+    assert attempts["count"] == 2, "a dropped connection must be retried once"
+    assert len(session.commands) == 1, "only the served attempt reaches the bridge"
+    assert record["address"] == "aa:bb:cc:dd:ee:01"
+
+
+async def test_command_reports_a_persistent_connection_drop():
+    """Two drops in a row must surface the actionable marker, not a bare message."""
+    session = FakeSession(load_snapshot("speakers_initial.json"))
+    client, _ = _client(session)
+    session.command_response = aiohttp.ServerDisconnectedError()
+    attempts = {"count": 0}
+    served_post = session.post
+
+    def always_drop(url, **kwargs):
+        attempts["count"] += 1
+        return served_post(url, **kwargs)
+
+    session.post = always_drop  # type: ignore[assignment]
+
+    with pytest.raises(aiohttp.ClientError) as failure:
+        await client.async_command("aa:bb:cc:dd:ee:01", "play")
+
+    assert attempts["count"] == 2
+    assert CONNECTION_DROPPED_MARKER in str(failure.value)
+
 

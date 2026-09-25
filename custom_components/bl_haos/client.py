@@ -20,8 +20,11 @@ from .const import (
     AUTH_FAILURE_MARKER,
     BEARER_PREFIX,
     BRIDGE_ID,
+    COMMAND_ATTEMPTS,
+    COMMAND_RETRY_DELAY_SECONDS,
     COMMAND_TIMEOUT_SECONDS,
     COMMAND_VERSION,
+    CONNECTION_DROPPED_MARKER,
     ERROR_CODE_INVALID_TOKEN,
     EVENT_SPEAKER_UPDATED,
     NATIVE_API_PATH,
@@ -167,14 +170,52 @@ class BLHAOSClient:
         )
 
     async def async_command(self, address: str, operation: str, **options: Any) -> dict[str, Any]:
-        """Submit a native command and cache its authoritative acknowledgement."""
+        """Submit a native command and cache its authoritative acknowledgement.
+
+        The add-on closes idle keep-alive sockets, and a command sent over one of
+        those pooled sockets fails as ``ServerDisconnectedError`` instead of
+        returning a response - which reached the user as "Failed to play_media:
+        Server disconnected". Every native command converges to a target state
+        (``play_media`` stops the previous stream first), so one retry is safe.
+        """
         normalized = normalize_address(address)
         if normalized is None:
             raise aiohttp.ClientError("Invalid Bluetooth address")
         payload = {PAYLOAD_VERSION_KEY: COMMAND_VERSION, PAYLOAD_OPERATION_KEY: operation, **{key: value for key, value in options.items() if value is not None}}
         log_address = _redacted_address(normalized)
-        started = monotonic()
-        _LOGGER.debug("Sending command '%s' to %s", operation, log_address)
+        for attempt in range(1, COMMAND_ATTEMPTS + 1):
+            started = monotonic()
+            _LOGGER.debug(
+                "Sending command '%s' to %s (attempt %d of %d)",
+                operation,
+                log_address,
+                attempt,
+                COMMAND_ATTEMPTS,
+            )
+            try:
+                return await self._async_send_command(normalized, payload, operation, log_address, started)
+            except aiohttp.ServerDisconnectedError as error:
+                if attempt >= COMMAND_ATTEMPTS:
+                    raise aiohttp.ClientError(
+                        f"{CONNECTION_DROPPED_MARKER} ({COMMAND_ATTEMPTS} attempt(s))"
+                    ) from error
+                _LOGGER.debug(
+                    "BL-HAOS closed the connection before answering command '%s' to %s; retrying",
+                    operation,
+                    log_address,
+                )
+                await asyncio.sleep(COMMAND_RETRY_DELAY_SECONDS)
+        raise aiohttp.ClientError(f"{CONNECTION_DROPPED_MARKER} ({COMMAND_ATTEMPTS} attempt(s))")
+
+    async def _async_send_command(
+        self,
+        normalized: str,
+        payload: dict[str, Any],
+        operation: str,
+        log_address: str,
+        started: float,
+    ) -> dict[str, Any]:
+        """Perform one command attempt and cache the resulting speaker record."""
         session = async_get_clientsession(self.hass)
         async with session.post(
             f"{self.endpoint}{NATIVE_API_PATH}/speakers/{normalized}/command",

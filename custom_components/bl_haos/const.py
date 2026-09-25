@@ -29,6 +29,12 @@ COMMAND_VERSION = 1
 ENTRY_TITLE = "BL-HAOS Bluetooth Audio"
 WEBSOCKET_NATIVE_PATH = "/ws/native"
 COMMAND_TIMEOUT_SECONDS = 60
+# A pooled keep-alive socket can be closed by the add-on between commands (its
+# own keep-alive timeout, a restart, or an update). Every native command
+# converges to a target state, so one retry is safe and turns a transient drop
+# into a successful action.
+COMMAND_ATTEMPTS = 2
+COMMAND_RETRY_DELAY_SECONDS = 0.5
 IDENTITY_TIMEOUT_SECONDS = 5
 STREAM_RECONNECT_BASE_DELAY_SECONDS = 1
 STREAM_RECONNECT_MAX_DELAY_SECONDS = 30
@@ -81,6 +87,7 @@ COMMAND_PLAY_MEDIA = "play_media"
 AUTH_FAILURE_MARKER = "authentication failed"
 UNTRUSTED_SINK_MARKER = "no longer a trusted audio sink"
 NO_ACTIVE_PLAYBACK_MARKER = "No active playback to resume"
+CONNECTION_DROPPED_MARKER = "BL-HAOS closed the connection before answering"
 
 # ---------------------------------------------------------------------------
 # Diagnostics projection
