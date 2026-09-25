@@ -38,6 +38,20 @@ async def async_get_config_entry_diagnostics(
             "speaker_count": len(speakers),
             "connected_speaker_count": sum(bool(speaker.get("connected")) for speaker in speakers),
         },
+        # Event-stream history: the add-on restarts on every update/config change,
+        # so "why did the log show a disconnect" is answerable from here. Reasons
+        # are categories, never raw connection errors (those embed the endpoint).
+        "stream": {
+            "available": client.transport_available,
+            "disconnects": client.stream_disconnects,
+            "reconnects": client.stream_reconnects,
+            "consecutive_failures": client.consecutive_failures,
+            "last_reason": client.last_disconnect_reason,
+            "last_disconnect_at": client.last_disconnect_at,
+            "last_recovery_at": client.last_recovery_at,
+            "last_outage_seconds": client.last_outage_seconds,
+            "credential_rejected": client.auth_failed,
+        },
         "support_bundle": {
             "available": client.transport_available,
             "schema": "bl-haos.support-bundle",

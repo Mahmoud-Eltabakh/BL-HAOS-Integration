@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from datetime import datetime, timezone
 from time import monotonic
 from collections.abc import Callable
 from typing import Any
@@ -19,6 +20,13 @@ from .const import BRIDGE_ID, NATIVE_API_PATH
 _MAC_ADDRESS = re.compile(r"^[0-9a-f]{2}(?::[0-9a-f]{2}){5}$")
 _COMMAND_TIMEOUT = aiohttp.ClientTimeout(total=60)
 _LOGGER = logging.getLogger(__name__)
+# The add-on restarts on every add-on update, config change, or Supervisor
+# restart, and each restart drops the event stream. Logging every retry turns a
+# single restart into a burst of warnings in the Home Assistant log, so an outage
+# is reported once and the recovery is reported when it ends.
+STREAM_RECONNECT_BASE_DELAY = 1
+STREAM_RECONNECT_MAX_DELAY = 30
+
 
 
 def _redacted_address(address: str) -> str:
@@ -45,6 +53,16 @@ class BLHAOSClient:
         self._closed = False
         self.transport_available = False
         self.auth_failed = False
+        # Event-stream history, surfaced through diagnostics so a drop is
+        # explainable without reading the Home Assistant log.
+        self.stream_disconnects = 0
+        self.stream_reconnects = 0
+        self.consecutive_failures = 0
+        self.last_disconnect_reason: str | None = None
+        self.last_disconnect_at: str | None = None
+        self.last_recovery_at: str | None = None
+        self.last_outage_seconds: float | None = None
+        self._outage_started: float | None = None
 
     @property
     def _headers(self) -> dict[str, str]:
@@ -189,22 +207,102 @@ class BLHAOSClient:
             listener(address)
         return address
 
+    @staticmethod
+    def _utc_now() -> str:
+        return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+    @staticmethod
+    def _describe_stream_failure(failure: BaseException | None) -> tuple[str, str]:
+        """Return ``(category, human detail)`` for a dropped event stream.
+
+        The category is what diagnostics store: a raw aiohttp message carries the
+        endpoint and adds nothing an operator can act on. In practice a refused
+        connection means the add-on is stopped, restarting, or being updated, and
+        a closed stream means the add-on went away mid-connection.
+        """
+        if failure is None:
+            return "stream-closed", "the add-on closed the event stream (restarting or updated)"
+        if "authentication failed" in str(failure).lower():
+            return "credential-rejected", "the native bridge rejected the stored credential"
+        if isinstance(failure, aiohttp.ClientConnectionError):
+            # ClientConnectorError (refused/DNS) and ServerDisconnectedError both
+            # mean the add-on went away.
+            return "bridge-unreachable", "the add-on is not reachable (stopped, restarting, or updating)"
+        if isinstance(failure, asyncio.TimeoutError):
+            return "stream-timeout", "the add-on did not answer in time"
+        if isinstance(failure, aiohttp.ClientError):
+            return type(failure).__name__, f"the event stream failed ({type(failure).__name__})"
+        return type(failure).__name__, f"the event stream sent an unexpected payload ({failure})"
+
+    def _async_stream_connected(self) -> None:
+        """Record a healthy stream and report the end of an outage."""
+        attempts = self.consecutive_failures
+        self.auth_failed = False
+        if attempts:
+            downtime: float | None = None
+            if self._outage_started is not None:
+                downtime = monotonic() - self._outage_started
+                self.last_outage_seconds = round(downtime, 1)
+            self.stream_reconnects += 1
+            self.last_recovery_at = self._utc_now()
+            _LOGGER.info(
+                "BL-HAOS event stream restored after %d failed attempt(s)%s.",
+                attempts,
+                f" ({downtime:.1f}s unreachable)" if downtime is not None else "",
+            )
+        self.consecutive_failures = 0
+        self._outage_started = None
+        _LOGGER.debug("Native WebSocket event stream connected successfully")
+        self._set_transport_available(True)
+
+    def _async_stream_disconnected(self, failure: BaseException | None) -> None:
+        """Record one stream failure, reporting an outage once instead of per retry."""
+        category, detail = self._describe_stream_failure(failure)
+        self.stream_disconnects += 1
+        self.consecutive_failures += 1
+        if self._outage_started is None:
+            self._outage_started = monotonic()
+        self.last_disconnect_reason = category
+        self.last_disconnect_at = self._utc_now()
+        self._set_transport_available(False)
+
+        if category == "credential-rejected":
+            # Rotated/invalid token: retrying with the same credential only
+            # hammers the bridge; park the transport so entities report
+            # unavailable and diagnostics can show the cause.
+            self.auth_failed = True
+            _LOGGER.error("BL-HAOS credential rejected; stop retrying until the entry is reloaded")
+            return
+
+        if self.consecutive_failures == 1:
+            _LOGGER.warning(
+                "BL-HAOS event stream unavailable: %s. Retrying every %ds up to %ds.",
+                detail,
+                STREAM_RECONNECT_BASE_DELAY,
+                STREAM_RECONNECT_MAX_DELAY,
+            )
+        else:
+            _LOGGER.debug(
+                "BL-HAOS event stream still unavailable (attempt %d): %s",
+                self.consecutive_failures,
+                detail,
+            )
+
     async def _async_listen(self) -> None:
         """Reconnect to the native event stream until the entry is unloaded."""
         parsed = urlsplit(self.endpoint)
         websocket_scheme = "wss" if parsed.scheme == "https" else "ws"
         websocket_url = urlunsplit((websocket_scheme, parsed.netloc, "/ws/native", "", ""))
-        delay = 1
+        delay = STREAM_RECONNECT_BASE_DELAY
         session = async_get_clientsession(self.hass)
         while not self._closed:
+            failure: BaseException | None = None
             try:
                 _LOGGER.debug("Connecting to native WebSocket event stream at %s", websocket_url)
                 async with session.ws_connect(websocket_url, headers=self._headers, heartbeat=30) as websocket:
-                    delay = 1
-                    self.auth_failed = False
-                    _LOGGER.debug("Native WebSocket event stream connected successfully")
+                    delay = STREAM_RECONNECT_BASE_DELAY
                     await self._async_refresh_snapshot(session)
-                    self._set_transport_available(True)
+                    self._async_stream_connected()
                     async for message in websocket:
                         if message.type == aiohttp.WSMsgType.TEXT:
                             payload = message.json()
@@ -214,21 +312,20 @@ class BLHAOSClient:
                                 _LOGGER.debug("Received native speaker update event: %s", payload)
                                 address = self._async_process_speaker(payload.get("data"))
                                 self._async_evict_if_rejected(payload.get("data"), address)
+                # The stream ended without raising: the add-on closed it, which is
+                # what an add-on restart or update looks like from here.
             except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as err:
-                _LOGGER.warning("BL-HAOS native event stream disconnected: %s", err)
-                self._set_transport_available(False)
-                if "authentication failed" in str(err).lower():
-                    # Rotated/invalid token: retrying with the same credential
-                    # only hammers the bridge; park the transport so entities
-                    # report unavailable and diagnostics can show the cause.
-                    self.auth_failed = True
-                    _LOGGER.error("BL-HAOS credential rejected; stop retrying until the entry is reloaded")
-                    return
+                failure = err
+
             if self._closed:
+                # The entry is unloading; the stream ending is not an outage.
+                return
+            self._async_stream_disconnected(failure)
+            if self.auth_failed:
                 return
             _LOGGER.debug("Scheduling native WebSocket reconnect in %ds...", delay)
             await asyncio.sleep(delay)
-            delay = min(delay * 2, 30)
+            delay = min(delay * 2, STREAM_RECONNECT_MAX_DELAY)
 
     def _async_evict_if_rejected(self, speaker: Any, processed_address: str | None) -> None:
         """Drop a cached speaker when a live event rejects its record.

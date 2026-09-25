@@ -16,6 +16,18 @@ The integration derives the add-on's private hostname from Supervisor discovery,
 
 The Bridge does not map its native API onto the host LAN. Ingress remains the browser-facing path, while the integration communicates over Home Assistant's private add-on network.
 
+## Add-on restarts and log noise
+
+Updating, reconfiguring, or rebooting the Bridge add-on stops its container, which drops the event stream. The integration reconnects on its own (1s doubling to 30s) and reloads the speaker snapshot as soon as it is back.
+
+That is expected, so an outage is reported **once**:
+
+- a single `warning` when the stream is lost, naming the likely cause (add-on stopped, restarting, or updating);
+- nothing further while it lasts — later retries are `debug`;
+- one `info` line when it returns, with the number of attempts and how long it was unreachable.
+
+If disconnects look more frequent than your add-on restarts, download the config-entry diagnostics: the `stream` block reports `disconnects`, `reconnects`, `consecutive_failures`, `last_reason`, `last_disconnect_at`, `last_recovery_at`, and `last_outage_seconds`. Reasons are categories (`stream-closed`, `bridge-unreachable`, `stream-timeout`, `credential-rejected`), never raw connection errors. `credential-rejected` is the one case the integration stops retrying — reload the entry after the add-on has issued a new token.
+
 ## HACS Publishing
 
 This repository is HACS-compatible as a custom integration repository. Listing it in HACS's default repository catalog is a separate HACS submission process; until then, users add the repository URL manually in HACS.
