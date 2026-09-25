@@ -67,7 +67,7 @@ async def test_unreachable_addon_logs_one_warning_per_outage(caplog):
     session.ws_connect = unreachable  # type: ignore[assignment]
 
     async def stop_after_three(_delay):
-        if client.stream_disconnects >= 3:
+        if client.stream_failed_attempts >= 3:
             client._closed = True
 
     with (
@@ -84,7 +84,8 @@ async def test_unreachable_addon_logs_one_warning_per_outage(caplog):
 
     # Later attempts stay at debug, and the outage is still counted accurately.
     assert any("still unavailable (attempt 2)" in message for message in _messages(caplog, logging.DEBUG))
-    assert client.stream_disconnects == 3
+    assert client.stream_failed_attempts == 3
+    assert client.stream_outages == 1, "retries inside one outage must not inflate the outage count"
     assert client.consecutive_failures == 3
     assert client.last_disconnect_reason == "bridge-unreachable"
     assert client.transport_available is False
@@ -142,7 +143,7 @@ async def test_clean_stream_close_is_reported_as_a_restart(caplog):
         await client._async_listen()
 
     assert client.last_disconnect_reason == "stream-closed"
-    assert client.stream_disconnects == 1
+    assert client.stream_outages == 1
     assert client.transport_available is False
     warnings = _messages(caplog, logging.WARNING)
     assert len(warnings) == 1

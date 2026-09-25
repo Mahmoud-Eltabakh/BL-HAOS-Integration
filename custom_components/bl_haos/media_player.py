@@ -27,7 +27,32 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.network import get_url
 
 from .client import BLHAOSClient, normalize_address
-from .const import DOMAIN, get_logger
+from .const import (
+    AUTH_FAILURE_MARKER,
+    COMMAND_PAUSE,
+    COMMAND_PLAY,
+    COMMAND_PLAY_MEDIA,
+    COMMAND_SET_VOLUME,
+    COMMAND_STOP,
+    DEVICE_MODEL,
+    DOMAIN,
+    MANUFACTURER,
+    MEDIA_TYPE_MAX_LENGTH,
+    NO_ACTIVE_PLAYBACK_MARKER,
+    PAYLOAD_ADAPTER_KEY,
+    PAYLOAD_ARTIST_KEY,
+    PAYLOAD_CONNECTED_KEY,
+    PAYLOAD_DURATION_KEY,
+    PAYLOAD_NAME_KEY,
+    PAYLOAD_PLAYBACK_KEY,
+    PAYLOAD_POSITION_KEY,
+    PAYLOAD_POSITION_UPDATED_AT_KEY,
+    PAYLOAD_STATE_KEY,
+    PAYLOAD_TITLE_KEY,
+    PAYLOAD_VOLUME_KEY,
+    UNTRUSTED_SINK_MARKER,
+    get_logger,
+)
 
 _LOGGER = get_logger(__name__)
 
@@ -43,7 +68,7 @@ def _normalize_media_type(media_type: str | None) -> str | None:
     if not media_type or not isinstance(media_type, str):
         return None
     candidate = media_type.strip()
-    if not candidate or len(candidate) > 128 or not _MEDIA_TYPE_PATTERN.fullmatch(candidate):
+    if not candidate or len(candidate) > MEDIA_TYPE_MAX_LENGTH or not _MEDIA_TYPE_PATTERN.fullmatch(candidate):
         return None
     return candidate.lower()
 
@@ -116,12 +141,12 @@ class BLHAOSMediaPlayer(MediaPlayerEntity):
 
     @property
     def _playback(self) -> dict:
-        playback = self._speaker.get("playback")
+        playback = self._speaker.get(PAYLOAD_PLAYBACK_KEY)
         return playback if isinstance(playback, dict) else {}
 
     @property
     def name(self) -> str:
-        return self._speaker.get("name", self._address)
+        return self._speaker.get(PAYLOAD_NAME_KEY, self._address)
 
     @property
     def available(self) -> bool:
@@ -131,26 +156,26 @@ class BLHAOSMediaPlayer(MediaPlayerEntity):
     @property
     def state(self):
         """Return the state of the device."""
-        if not self._speaker.get("connected"):
+        if not self._speaker.get(PAYLOAD_CONNECTED_KEY):
             return MediaPlayerState.OFF
-        bridge_state = self._playback.get("state", MediaPlayerState.IDLE)
+        bridge_state = self._playback.get(PAYLOAD_STATE_KEY, MediaPlayerState.IDLE)
         valid_states = {MediaPlayerState.IDLE, MediaPlayerState.PLAYING, MediaPlayerState.PAUSED}
         return bridge_state if bridge_state in valid_states else MediaPlayerState.IDLE
 
     @property
     def volume_level(self) -> float | None:
-        return self._playback.get("volume")
+        return self._playback.get(PAYLOAD_VOLUME_KEY)
 
     @property
     def media_position(self) -> int | None:
         """Elapsed playback time so Home Assistant can draw a progress bar."""
-        position = self._playback.get("position")
+        position = self._playback.get(PAYLOAD_POSITION_KEY)
         return int(position) if isinstance(position, (int, float)) else None
 
     @property
     def media_position_updated_at(self) -> datetime | None:
         """Timestamp the reported position belongs to; HA extrapolates from here."""
-        updated = self._playback.get("position_updated_at")
+        updated = self._playback.get(PAYLOAD_POSITION_UPDATED_AT_KEY)
         if not isinstance(updated, (int, float)):
             return None
         return datetime.fromtimestamp(updated, tz=timezone.utc)
@@ -158,19 +183,19 @@ class BLHAOSMediaPlayer(MediaPlayerEntity):
     @property
     def media_duration(self) -> int | None:
         """Total media length in seconds, once the bridge has probed it."""
-        duration = self._playback.get("duration")
+        duration = self._playback.get(PAYLOAD_DURATION_KEY)
         return int(duration) if isinstance(duration, (int, float)) and duration > 0 else None
 
     @property
     def media_title(self) -> str | None:
         """Name of the stream being played, so Home Assistant can label it."""
-        title = self._playback.get("title")
+        title = self._playback.get(PAYLOAD_TITLE_KEY)
         return title if isinstance(title, str) and title.strip() else None
 
     @property
     def media_artist(self) -> str | None:
         """Embedded artist tag when the media carries one."""
-        artist = self._playback.get("artist")
+        artist = self._playback.get(PAYLOAD_ARTIST_KEY)
         return artist if isinstance(artist, str) and artist.strip() else None
 
     @property
@@ -178,14 +203,14 @@ class BLHAOSMediaPlayer(MediaPlayerEntity):
         return DeviceInfo(
             identifiers={(DOMAIN, self._address)},
             name=self.name,
-            manufacturer="BL-HAOS",
-            model="Bluetooth Speaker",
+            manufacturer=MANUFACTURER,
+            model=DEVICE_MODEL,
         )
 
     @property
     def extra_state_attributes(self) -> dict[str, str]:
         """Expose the physical Bluetooth address for diagnostics."""
-        return {"bluetooth_address": self._address, "adapter": self._speaker.get("adapter", "")}
+        return {"bluetooth_address": self._address, PAYLOAD_ADAPTER_KEY: self._speaker.get(PAYLOAD_ADAPTER_KEY, "")}
 
     async def async_added_to_hass(self) -> None:
         """Push cached state changes without entity network I/O."""
@@ -212,14 +237,14 @@ class BLHAOSMediaPlayer(MediaPlayerEntity):
             _LOGGER.debug("Entity %s command %s completed successfully", self.entity_id, operation)
         except aiohttp.ClientError as error:
             message = str(error)
-            if operation == "play" and "No active playback to resume" in message:
+            if operation == COMMAND_PLAY and NO_ACTIVE_PLAYBACK_MARKER in message:
                 _LOGGER.debug("Entity %s ignore 'No active playback to resume'", self.entity_id)
                 return
-            if "authentication failed" in message.lower():
+            if AUTH_FAILURE_MARKER in message.lower():
                 raise HomeAssistantError(
                     "BL-HAOS rejected the configured token; reload the integration entry to retry"
                 ) from error
-            if "no longer a trusted audio sink" in message:
+            if UNTRUSTED_SINK_MARKER in message:
                 raise HomeAssistantError(
                     "Speaker disconnected while the command was in flight"
                 ) from error
@@ -230,16 +255,16 @@ class BLHAOSMediaPlayer(MediaPlayerEntity):
             raise HomeAssistantError(f"Timeout communicating with speaker during {operation}") from error
 
     async def async_media_play(self) -> None:
-        await self._async_command("play")
+        await self._async_command(COMMAND_PLAY)
 
     async def async_media_pause(self) -> None:
-        await self._async_command("pause")
+        await self._async_command(COMMAND_PAUSE)
 
     async def async_media_stop(self) -> None:
-        await self._async_command("stop")
+        await self._async_command(COMMAND_STOP)
 
     async def async_set_volume_level(self, volume: float) -> None:
-        await self._async_command("set_volume", volume=volume)
+        await self._async_command(COMMAND_SET_VOLUME, volume=volume)
 
     async def async_play_media(self, media_type: str, media_id: str, **kwargs) -> None:
         """Resolve Home Assistant sources to an add-on-reachable media URL."""
@@ -267,7 +292,7 @@ class BLHAOSMediaPlayer(MediaPlayerEntity):
             media_type,
             url,
         )
-        await self._async_command("play_media", url=url, media_type=media_type)
+        await self._async_command(COMMAND_PLAY_MEDIA, url=url, media_type=media_type)
 
     async def async_browse_media(
         self, media_content_type: str | None = None, media_content_id: str | None = None

@@ -10,16 +10,28 @@ from homeassistant import config_entries
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
+    ADDON_HOSTNAME_SLUG,
+    ADDON_SLUG,
+    BEARER_PREFIX,
     BRIDGE_ID,
     BRIDGE_UNIQUE_ID,
     CONF_ENDPOINT,
     CONF_LOG_LEVEL,
     CONF_TOKEN,
+    CONFIG_ENTRY_VERSION,
+    DEFAULT_ENDPOINT_EXAMPLE,
+    DEFAULT_PORT,
     DOMAIN,
+    ENDPOINT_SCHEMES,
+    ENTRY_TITLE,
+    HTTP_SCHEME_PREFIX,
+    IDENTITY_TIMEOUT_SECONDS,
     NATIVE_API_PATH,
+    PAYLOAD_BRIDGE_ID_KEY,
     get_logger,
     normalize_log_level,
 )
+from http import HTTPStatus
 
 _LOGGER = get_logger(__name__)
 
@@ -27,7 +39,7 @@ _LOGGER = get_logger(__name__)
 class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Configure one local BL-HAOS native bridge."""
 
-    VERSION = 1
+    VERSION = CONFIG_ENTRY_VERSION
 
     @staticmethod
     def _validate_endpoint(endpoint: str) -> str | None:
@@ -35,11 +47,11 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         endpoint = str(endpoint or "").strip()
         if not endpoint:
             return None
-        if not endpoint.startswith(("http://", "https://")):
-            endpoint = f"http://{endpoint}"
+        if not endpoint.startswith(ENDPOINT_SCHEMES):
+            endpoint = f"{HTTP_SCHEME_PREFIX}{endpoint}"
         parsed = urlsplit(endpoint)
         if (
-            parsed.scheme not in ("http", "https")
+            parsed.scheme not in ENDPOINT_SCHEME_NAMES
             or not parsed.hostname
             or parsed.username
             or parsed.password
@@ -49,7 +61,7 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         ):
             return None
         hostname = parsed.hostname.lower()
-        port = parsed.port or 8099
+        port = parsed.port or DEFAULT_PORT
         # IPv6 literals must stay bracketed in the reconstructed netloc.
         host_part = f"[{hostname}]" if ":" in hostname else hostname
         return f"{parsed.scheme}://{host_part}:{port}"
@@ -57,9 +69,9 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @staticmethod
     def _endpoint_from_hassio_slug(slug: str) -> str | None:
         """Derive the Supervisor-private add-on hostname from its slug."""
-        if not ("bl_haos" in slug or slug.endswith("bl-haos")):
+        if not (ADDON_SLUG in slug or slug.endswith(ADDON_HOSTNAME_SLUG)):
             return None
-        return f"http://{slug.replace('_', '-')}:8099"
+        return f"{HTTP_SCHEME_PREFIX}{slug.replace('_', '-')}:{DEFAULT_PORT}"
 
     async def _async_validate_connection(self, endpoint: str, token: str) -> bool:
         """Validate the native bridge identity before storing an entry."""
@@ -68,14 +80,14 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 _LOGGER.debug("Validating bridge connection to endpoint: %s", target)
                 async with async_get_clientsession(self.hass).get(
                     f"{target}{NATIVE_API_PATH}/identity",
-                    headers={"Authorization": f"Bearer {token}"},
-                    timeout=aiohttp.ClientTimeout(total=5),
+                    headers={"Authorization": f"{BEARER_PREFIX}{token}"},
+                    timeout=aiohttp.ClientTimeout(total=IDENTITY_TIMEOUT_SECONDS),
                 ) as response:
                     payload = await response.json(content_type=None)
                     if (
-                        response.status == 200
+                        response.status == HTTPStatus.OK
                         and isinstance(payload, dict)
-                        and payload.get("bridge_id") == BRIDGE_ID
+                        and payload.get(PAYLOAD_BRIDGE_ID_KEY) == BRIDGE_ID
                     ):
                         _LOGGER.debug(
                             "Bridge identity verified at %s (bridge_id=%s, version=%s)",
@@ -110,7 +122,7 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     if await self._async_validate_connection(candidate, token):
                         _LOGGER.debug("Config flow user step creating entry for endpoint: %s", candidate)
                         return self.async_create_entry(
-                            title="BL-HAOS Bluetooth Audio",
+                            title=ENTRY_TITLE,
                             data={CONF_ENDPOINT: candidate, CONF_TOKEN: token},
                         )
             _LOGGER.debug("User configuration failed connection validation for %s", raw_endpoint)
@@ -118,7 +130,7 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema({
-                vol.Required(CONF_ENDPOINT, default="http://c839f4a9-bl-haos:8099"): str,
+                vol.Required(CONF_ENDPOINT, default=DEFAULT_ENDPOINT_EXAMPLE): str,
                 vol.Required(CONF_TOKEN): str,
             }),
             errors=errors,
@@ -158,7 +170,7 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if connection_valid:
             _LOGGER.debug("Creating entry from validated Hass.io discovery: %s", endpoint)
             return self.async_create_entry(
-                title="BL-HAOS Bluetooth Audio",
+                title=ENTRY_TITLE,
                 data={
                     CONF_ENDPOINT: endpoint,
                     CONF_TOKEN: self._discovered_token,
@@ -180,7 +192,7 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_abort(reason="cannot_connect")
         _LOGGER.debug("Hass.io confirm succeeded, creating config entry for %s", self._discovered_endpoint)
         return self.async_create_entry(
-            title="BL-HAOS Bluetooth Audio",
+            title=ENTRY_TITLE,
             data={
                 CONF_ENDPOINT: self._discovered_endpoint,
                 CONF_TOKEN: user_input[CONF_TOKEN],

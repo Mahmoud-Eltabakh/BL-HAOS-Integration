@@ -8,7 +8,21 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.redact import async_redact_data
 
-from .const import CONF_ENDPOINT, get_logger
+from .const import (
+    CONF_ENDPOINT,
+    DIAGNOSTICS_CONTRACT_VERSION,
+    DIAGNOSTICS_EVENTS_VERSION,
+    DIAGNOSTICS_HEALTH_VERSION,
+    DIAGNOSTICS_REDACT_KEYS,
+    HEALTH_STATUS_HEALTHY,
+    HEALTH_STATUS_UNAVAILABLE,
+    PAYLOAD_AVAILABLE_KEY,
+    PAYLOAD_CONNECTED_KEY,
+    PAYLOAD_PLAYBACK_KEY,
+    PAYLOAD_STATE_KEY,
+    SUPPORT_BUNDLE_SCHEMA,
+    get_logger,
+)
 
 _LOGGER = get_logger(__name__)
 
@@ -26,8 +40,8 @@ async def async_get_config_entry_diagnostics(
         len(speakers),
     )
     payload = {
-        "contract_version": 1,
-        "health_status": "healthy" if client.transport_available else "unavailable",
+        "contract_version": DIAGNOSTICS_CONTRACT_VERSION,
+        "health_status": HEALTH_STATUS_HEALTHY if client.transport_available else HEALTH_STATUS_UNAVAILABLE,
         "auth_failed": client.auth_failed,
         "entry": {
             "entry_id": entry.entry_id,
@@ -36,14 +50,17 @@ async def async_get_config_entry_diagnostics(
         "transport": {
             "available": client.transport_available,
             "speaker_count": len(speakers),
-            "connected_speaker_count": sum(bool(speaker.get("connected")) for speaker in speakers),
+            "connected_speaker_count": sum(bool(speaker.get(PAYLOAD_CONNECTED_KEY)) for speaker in speakers),
         },
         # Event-stream history: the add-on restarts on every update/config change,
-        # so "why did the log show a disconnect" is answerable from here. Reasons
-        # are categories, never raw connection errors (those embed the endpoint).
+        # so "why did the log show a disconnect" is answerable from here. An outage
+        # is one loss of the stream; failed_attempts counts the retries inside it.
+        # Reasons are categories, never raw connection errors (those embed the
+        # endpoint).
         "stream": {
             "available": client.transport_available,
-            "disconnects": client.stream_disconnects,
+            "outages": client.stream_outages,
+            "failed_attempts": client.stream_failed_attempts,
             "reconnects": client.stream_reconnects,
             "consecutive_failures": client.consecutive_failures,
             "last_reason": client.last_disconnect_reason,
@@ -54,19 +71,20 @@ async def async_get_config_entry_diagnostics(
         },
         "support_bundle": {
             "available": client.transport_available,
-            "schema": "bl-haos.support-bundle",
-            "versions": {"diagnostics": 1, "events": 1, "health": 1},
+            "schema": SUPPORT_BUNDLE_SCHEMA,
+            "versions": {
+                "diagnostics": DIAGNOSTICS_CONTRACT_VERSION,
+                "events": DIAGNOSTICS_EVENTS_VERSION,
+                "health": DIAGNOSTICS_HEALTH_VERSION,
+            },
         },
         "speakers": [
             {
-                "available": bool(speaker.get("available")),
-                "connected": bool(speaker.get("connected")),
-                "playback_state": speaker.get("playback", {}).get("state"),
+                "available": bool(speaker.get(PAYLOAD_AVAILABLE_KEY)),
+                "connected": bool(speaker.get(PAYLOAD_CONNECTED_KEY)),
+                "playback_state": speaker.get(PAYLOAD_PLAYBACK_KEY, {}).get(PAYLOAD_STATE_KEY),
             }
             for speaker in speakers
         ],
     }
-    return async_redact_data(
-        payload,
-        {"authorization", "credential", "endpoint", "media_id", "url", "token", "password"},
-    )
+    return async_redact_data(payload, DIAGNOSTICS_REDACT_KEYS)

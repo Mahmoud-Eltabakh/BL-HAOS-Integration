@@ -26,7 +26,7 @@ That is expected, so an outage is reported **once**:
 - nothing further while it lasts — later retries are `debug`;
 - one `info` line when it returns, with the number of attempts and how long it was unreachable.
 
-If disconnects look more frequent than your add-on restarts, download the config-entry diagnostics: the `stream` block reports `disconnects`, `reconnects`, `consecutive_failures`, `last_reason`, `last_disconnect_at`, `last_recovery_at`, and `last_outage_seconds`. Reasons are categories (`stream-closed`, `bridge-unreachable`, `stream-timeout`, `credential-rejected`), never raw connection errors. `credential-rejected` is the one case the integration stops retrying — reload the entry after the add-on has issued a new token.
+If disconnects look more frequent than your add-on restarts, download the config-entry diagnostics: the `stream` block reports `outages` (one per lost stream), `failed_attempts` (the retries inside them), `reconnects`, `consecutive_failures`, `last_reason`, `last_disconnect_at`, `last_recovery_at`, and `last_outage_seconds`. Reasons are categories (`stream-closed`, `bridge-unreachable`, `stream-timeout`, `credential-rejected`), never raw connection errors. `credential-rejected` is the one case the integration stops retrying — reload the entry after the add-on has issued a new token.
 
 ## HACS Publishing
 

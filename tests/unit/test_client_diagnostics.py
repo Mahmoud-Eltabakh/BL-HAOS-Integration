@@ -52,7 +52,8 @@ async def test_diagnostics_reports_stream_outage_history():
 
     stream = payload["stream"]
     assert stream["available"] is False
-    assert stream["disconnects"] == 1
+    assert stream["outages"] == 1
+    assert stream["failed_attempts"] == 1
     assert stream["last_reason"] == "stream-closed"
     assert stream["last_disconnect_at"] is not None
     assert stream["credential_rejected"] is False

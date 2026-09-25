@@ -15,6 +15,92 @@ PLATFORMS = ("media_player",)
 INTEGRATION_LOGGER = "custom_components.bl_haos"
 LOG_LEVEL_MAP = {"trace": "debug", "notice": "info", "fatal": "critical"}
 
+# ---------------------------------------------------------------------------
+# Native bridge transport contract
+# ---------------------------------------------------------------------------
+DEFAULT_PORT = 8099
+HTTP_SCHEME_PREFIX = "http://"
+HTTPS_SCHEME_PREFIX = "https://"
+ENDPOINT_SCHEMES = (HTTP_SCHEME_PREFIX, HTTPS_SCHEME_PREFIX)
+ENDPOINT_SCHEME_NAMES = frozenset({"http", "https"})
+BEARER_PREFIX = "Bearer "
+CONFIG_ENTRY_VERSION = 1
+COMMAND_VERSION = 1
+ENTRY_TITLE = "BL-HAOS Bluetooth Audio"
+WEBSOCKET_NATIVE_PATH = "/ws/native"
+COMMAND_TIMEOUT_SECONDS = 60
+IDENTITY_TIMEOUT_SECONDS = 5
+STREAM_RECONNECT_BASE_DELAY_SECONDS = 1
+STREAM_RECONNECT_MAX_DELAY_SECONDS = 30
+WEBSOCKET_HEARTBEAT_SECONDS = 30
+MEDIA_TYPE_MAX_LENGTH = 128
+ADDON_SLUG = "bl_haos"
+ADDON_HOSTNAME_SLUG = "bl-haos"
+MANUFACTURER = "BL-HAOS"
+DEVICE_MODEL = "Bluetooth Speaker"
+# Example Supervisor-private hostname shown as the manual-entry form default.
+DEFAULT_ENDPOINT_EXAMPLE = f"{HTTP_SCHEME_PREFIX}c839f4a9-{ADDON_HOSTNAME_SLUG}:{DEFAULT_PORT}"
+
+# ---------------------------------------------------------------------------
+# Native payload vocabulary
+# ---------------------------------------------------------------------------
+EVENT_SPEAKER_UPDATED = "speaker_updated"
+PAYLOAD_EVENT_KEY = "event"
+PAYLOAD_DATA_KEY = "data"
+PAYLOAD_SPEAKERS_KEY = "speakers"
+PAYLOAD_ADDRESS_KEY = "address"
+PAYLOAD_BRIDGE_ID_KEY = "bridge_id"
+PAYLOAD_DETAIL_KEY = "detail"
+PAYLOAD_ERROR_KEY = "error"
+PAYLOAD_ERROR_CODE_KEY = "error_code"
+PAYLOAD_VERSION_KEY = "version"
+PAYLOAD_OPERATION_KEY = "operation"
+PAYLOAD_PLAYBACK_KEY = "playback"
+PAYLOAD_STATE_KEY = "state"
+PAYLOAD_VOLUME_KEY = "volume"
+PAYLOAD_NAME_KEY = "name"
+PAYLOAD_ADAPTER_KEY = "adapter"
+PAYLOAD_POSITION_KEY = "position"
+PAYLOAD_POSITION_UPDATED_AT_KEY = "position_updated_at"
+PAYLOAD_DURATION_KEY = "duration"
+PAYLOAD_TITLE_KEY = "title"
+PAYLOAD_ARTIST_KEY = "artist"
+PAYLOAD_IS_AUDIO_SINK_KEY = "is_audio_sink"
+PAYLOAD_TRUSTED_KEY = "trusted"
+PAYLOAD_PAIRED_KEY = "paired"
+PAYLOAD_CONNECTED_KEY = "connected"
+PAYLOAD_AVAILABLE_KEY = "available"
+ERROR_CODE_INVALID_TOKEN = "invalid_token"
+
+# Command verbs and the bridge-side error markers the entity maps to messages.
+COMMAND_PLAY = "play"
+COMMAND_PAUSE = "pause"
+COMMAND_STOP = "stop"
+COMMAND_SET_VOLUME = "set_volume"
+COMMAND_PLAY_MEDIA = "play_media"
+AUTH_FAILURE_MARKER = "authentication failed"
+UNTRUSTED_SINK_MARKER = "no longer a trusted audio sink"
+NO_ACTIVE_PLAYBACK_MARKER = "No active playback to resume"
+
+# ---------------------------------------------------------------------------
+# Diagnostics projection
+# ---------------------------------------------------------------------------
+DIAGNOSTICS_CONTRACT_VERSION = 1
+DIAGNOSTICS_EVENTS_VERSION = 1
+DIAGNOSTICS_HEALTH_VERSION = 1
+SUPPORT_BUNDLE_SCHEMA = "bl-haos.support-bundle"
+HEALTH_STATUS_HEALTHY = "healthy"
+HEALTH_STATUS_UNAVAILABLE = "unavailable"
+DIAGNOSTICS_REDACT_KEYS = {
+    "authorization",
+    "credential",
+    "endpoint",
+    "media_id",
+    "url",
+    "token",
+    "password",
+}
+
 
 class BLHAOSLoggerAdapter(logging.LoggerAdapter[logging.Logger]):
 	"""Prefix integration messages so they are distinct in Home Assistant logs."""

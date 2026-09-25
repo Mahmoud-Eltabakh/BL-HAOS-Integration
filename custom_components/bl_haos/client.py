@@ -6,6 +6,7 @@ import asyncio
 import logging
 import re
 from datetime import datetime, timezone
+from http import HTTPStatus
 from time import monotonic
 from collections.abc import Callable
 from typing import Any
@@ -15,17 +16,48 @@ import aiohttp
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import BRIDGE_ID, NATIVE_API_PATH
+from .const import (
+    AUTH_FAILURE_MARKER,
+    BEARER_PREFIX,
+    BRIDGE_ID,
+    COMMAND_TIMEOUT_SECONDS,
+    COMMAND_VERSION,
+    ERROR_CODE_INVALID_TOKEN,
+    EVENT_SPEAKER_UPDATED,
+    NATIVE_API_PATH,
+    PAYLOAD_ADDRESS_KEY,
+    PAYLOAD_AVAILABLE_KEY,
+    PAYLOAD_BRIDGE_ID_KEY,
+    PAYLOAD_CONNECTED_KEY,
+    PAYLOAD_DATA_KEY,
+    PAYLOAD_DETAIL_KEY,
+    PAYLOAD_ERROR_CODE_KEY,
+    PAYLOAD_ERROR_KEY,
+    PAYLOAD_EVENT_KEY,
+    PAYLOAD_IS_AUDIO_SINK_KEY,
+    PAYLOAD_OPERATION_KEY,
+    PAYLOAD_PAIRED_KEY,
+    PAYLOAD_PLAYBACK_KEY,
+    PAYLOAD_SPEAKERS_KEY,
+    PAYLOAD_STATE_KEY,
+    PAYLOAD_TRUSTED_KEY,
+    PAYLOAD_VERSION_KEY,
+    PAYLOAD_VOLUME_KEY,
+    STREAM_RECONNECT_BASE_DELAY_SECONDS,
+    STREAM_RECONNECT_MAX_DELAY_SECONDS,
+    WEBSOCKET_HEARTBEAT_SECONDS,
+    WEBSOCKET_NATIVE_PATH,
+)
 
 _MAC_ADDRESS = re.compile(r"^[0-9a-f]{2}(?::[0-9a-f]{2}){5}$")
-_COMMAND_TIMEOUT = aiohttp.ClientTimeout(total=60)
+_COMMAND_TIMEOUT = aiohttp.ClientTimeout(total=COMMAND_TIMEOUT_SECONDS)
 _LOGGER = logging.getLogger(__name__)
 # The add-on restarts on every add-on update, config change, or Supervisor
 # restart, and each restart drops the event stream. Logging every retry turns a
 # single restart into a burst of warnings in the Home Assistant log, so an outage
 # is reported once and the recovery is reported when it ends.
-STREAM_RECONNECT_BASE_DELAY = 1
-STREAM_RECONNECT_MAX_DELAY = 30
+STREAM_RECONNECT_BASE_DELAY = STREAM_RECONNECT_BASE_DELAY_SECONDS
+STREAM_RECONNECT_MAX_DELAY = STREAM_RECONNECT_MAX_DELAY_SECONDS
 
 
 
@@ -54,8 +86,10 @@ class BLHAOSClient:
         self.transport_available = False
         self.auth_failed = False
         # Event-stream history, surfaced through diagnostics so a drop is
-        # explainable without reading the Home Assistant log.
-        self.stream_disconnects = 0
+        # explainable without reading the Home Assistant log. An outage is one
+        # loss of the stream; failed_attempts counts the retries inside it.
+        self.stream_outages = 0
+        self.stream_failed_attempts = 0
         self.stream_reconnects = 0
         self.consecutive_failures = 0
         self.last_disconnect_reason: str | None = None
@@ -66,7 +100,7 @@ class BLHAOSClient:
 
     @property
     def _headers(self) -> dict[str, str]:
-        return {"Authorization": f"Bearer {self.token}"}
+        return {"Authorization": f"{BEARER_PREFIX}{self.token}"}
 
     @staticmethod
     def _response_error(status: int, body: Any, fallback: str) -> aiohttp.ClientError:
@@ -77,8 +111,8 @@ class BLHAOSClient:
         the real HTTP failure.
         """
         if isinstance(body, dict):
-            detail = body.get("detail") or body.get("error") or fallback
-            if body.get("error_code") == "invalid_token" or status in (401, 403):
+            detail = body.get(PAYLOAD_DETAIL_KEY) or body.get(PAYLOAD_ERROR_KEY) or fallback
+            if body.get(PAYLOAD_ERROR_CODE_KEY) == ERROR_CODE_INVALID_TOKEN or status in (HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN):
                 return aiohttp.ClientError(f"BL-HAOS authentication failed (HTTP {status}): {detail}")
             return aiohttp.ClientError(detail if isinstance(detail, str) else fallback)
         return aiohttp.ClientError(fallback)
@@ -89,7 +123,7 @@ class BLHAOSClient:
         session = async_get_clientsession(self.hass)
         async with session.get(f"{self.endpoint}{NATIVE_API_PATH}/identity", headers=self._headers) as response:
             identity = await response.json(content_type=None)
-            if response.status != 200 or not isinstance(identity, dict) or identity.get("bridge_id") != BRIDGE_ID:
+            if response.status != HTTPStatus.OK or not isinstance(identity, dict) or identity.get(PAYLOAD_BRIDGE_ID_KEY) != BRIDGE_ID:
                 raise self._response_error(
                     response.status, identity, "Unexpected BL-HAOS native bridge identity"
                 )
@@ -111,12 +145,12 @@ class BLHAOSClient:
         _LOGGER.debug("Refreshing speakers snapshot from %s%s", self.endpoint, NATIVE_API_PATH)
         async with session.get(f"{self.endpoint}{NATIVE_API_PATH}/speakers", headers=self._headers) as response:
             payload = await response.json(content_type=None)
-            if response.status != 200:
+            if response.status != HTTPStatus.OK:
                 raise self._response_error(response.status, payload, "Unable to load BL-HAOS speakers")
-        if not isinstance(payload, dict) or not isinstance(payload.get("speakers"), dict):
+        if not isinstance(payload, dict) or not isinstance(payload.get(PAYLOAD_SPEAKERS_KEY), dict):
             raise ValueError("Invalid BL-HAOS speakers snapshot")
         snapshot_addresses: set[str] = set()
-        for speaker in payload["speakers"].values():
+        for speaker in payload[PAYLOAD_SPEAKERS_KEY].values():
             address = self._async_process_speaker(speaker)
             if address is not None:
                 snapshot_addresses.add(address)
@@ -137,7 +171,7 @@ class BLHAOSClient:
         normalized = normalize_address(address)
         if normalized is None:
             raise aiohttp.ClientError("Invalid Bluetooth address")
-        payload = {"version": 1, "operation": operation, **{key: value for key, value in options.items() if value is not None}}
+        payload = {PAYLOAD_VERSION_KEY: COMMAND_VERSION, PAYLOAD_OPERATION_KEY: operation, **{key: value for key, value in options.items() if value is not None}}
         log_address = _redacted_address(normalized)
         started = monotonic()
         _LOGGER.debug("Sending command '%s' to %s", operation, log_address)
@@ -149,14 +183,14 @@ class BLHAOSClient:
             timeout=_COMMAND_TIMEOUT,
         ) as response:
             body = await response.json(content_type=None)
-            if response.status != 200:
+            if response.status != HTTPStatus.OK:
                 _LOGGER.warning(
                     "Command '%s' to %s failed (HTTP %s) after %.1fs: %s",
                     operation,
                     log_address,
                     response.status,
                     monotonic() - started,
-                    body.get("detail", "unknown error") if isinstance(body, dict) else "invalid response",
+                    body.get(PAYLOAD_DETAIL_KEY, "unknown error") if isinstance(body, dict) else "invalid response",
                 )
                 raise self._response_error(response.status, body, "BL-HAOS command failed")
         _LOGGER.info("Command '%s' to %s completed in %.1fs", operation, log_address, monotonic() - started)
@@ -185,22 +219,22 @@ class BLHAOSClient:
     def _async_process_speaker(self, speaker: Any) -> str | None:
         if not isinstance(speaker, dict):
             return None
-        is_audio = speaker.get("is_audio_sink", True)
-        is_valid_sink = bool(speaker.get("trusted") or speaker.get("paired") or speaker.get("connected") or speaker.get("available"))
+        is_audio = speaker.get(PAYLOAD_IS_AUDIO_SINK_KEY, True)
+        is_valid_sink = bool(speaker.get(PAYLOAD_TRUSTED_KEY) or speaker.get(PAYLOAD_PAIRED_KEY) or speaker.get(PAYLOAD_CONNECTED_KEY) or speaker.get(PAYLOAD_AVAILABLE_KEY))
         if not (is_audio and is_valid_sink):
             return None
-        address = normalize_address(str(speaker.get("address", "")))
+        address = normalize_address(str(speaker.get(PAYLOAD_ADDRESS_KEY, "")))
         if address is None:
             return None
-        normalized_speaker = {**speaker, "address": address}
+        normalized_speaker = {**speaker, PAYLOAD_ADDRESS_KEY: address}
         if self.speakers.get(address) == normalized_speaker:
             return address
         _LOGGER.debug(
             "Updating cached speaker %s: connected=%s, state=%s, volume=%s",
             address,
-            normalized_speaker.get("connected"),
-            normalized_speaker.get("playback", {}).get("state"),
-            normalized_speaker.get("playback", {}).get("volume"),
+            normalized_speaker.get(PAYLOAD_CONNECTED_KEY),
+            normalized_speaker.get(PAYLOAD_PLAYBACK_KEY, {}).get(PAYLOAD_STATE_KEY),
+            normalized_speaker.get(PAYLOAD_PLAYBACK_KEY, {}).get(PAYLOAD_VOLUME_KEY),
         )
         self.speakers[address] = normalized_speaker
         for listener in tuple(self._update_listeners):
@@ -222,7 +256,7 @@ class BLHAOSClient:
         """
         if failure is None:
             return "stream-closed", "the add-on closed the event stream (restarting or updated)"
-        if "authentication failed" in str(failure).lower():
+        if AUTH_FAILURE_MARKER in str(failure).lower():
             return "credential-rejected", "the native bridge rejected the stored credential"
         if isinstance(failure, aiohttp.ClientConnectionError):
             # ClientConnectorError (refused/DNS) and ServerDisconnectedError both
@@ -258,9 +292,11 @@ class BLHAOSClient:
     def _async_stream_disconnected(self, failure: BaseException | None) -> None:
         """Record one stream failure, reporting an outage once instead of per retry."""
         category, detail = self._describe_stream_failure(failure)
-        self.stream_disconnects += 1
+        self.stream_failed_attempts += 1
         self.consecutive_failures += 1
         if self._outage_started is None:
+            # First failure of this outage: count the outage, not each retry.
+            self.stream_outages += 1
             self._outage_started = monotonic()
         self.last_disconnect_reason = category
         self.last_disconnect_at = self._utc_now()
@@ -292,14 +328,14 @@ class BLHAOSClient:
         """Reconnect to the native event stream until the entry is unloaded."""
         parsed = urlsplit(self.endpoint)
         websocket_scheme = "wss" if parsed.scheme == "https" else "ws"
-        websocket_url = urlunsplit((websocket_scheme, parsed.netloc, "/ws/native", "", ""))
+        websocket_url = urlunsplit((websocket_scheme, parsed.netloc, WEBSOCKET_NATIVE_PATH, "", ""))
         delay = STREAM_RECONNECT_BASE_DELAY
         session = async_get_clientsession(self.hass)
         while not self._closed:
             failure: BaseException | None = None
             try:
                 _LOGGER.debug("Connecting to native WebSocket event stream at %s", websocket_url)
-                async with session.ws_connect(websocket_url, headers=self._headers, heartbeat=30) as websocket:
+                async with session.ws_connect(websocket_url, headers=self._headers, heartbeat=WEBSOCKET_HEARTBEAT_SECONDS) as websocket:
                     delay = STREAM_RECONNECT_BASE_DELAY
                     await self._async_refresh_snapshot(session)
                     self._async_stream_connected()
@@ -308,10 +344,10 @@ class BLHAOSClient:
                             payload = message.json()
                             if not isinstance(payload, dict):
                                 raise ValueError("Invalid BL-HAOS native event")
-                            if payload.get("event") == "speaker_updated":
+                            if payload.get(PAYLOAD_EVENT_KEY) == EVENT_SPEAKER_UPDATED:
                                 _LOGGER.debug("Received native speaker update event: %s", payload)
-                                address = self._async_process_speaker(payload.get("data"))
-                                self._async_evict_if_rejected(payload.get("data"), address)
+                                address = self._async_process_speaker(payload.get(PAYLOAD_DATA_KEY))
+                                self._async_evict_if_rejected(payload.get(PAYLOAD_DATA_KEY), address)
                 # The stream ended without raising: the add-on closed it, which is
                 # what an add-on restart or update looks like from here.
             except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as err:
@@ -335,7 +371,7 @@ class BLHAOSClient:
         """
         if processed_address is not None or not isinstance(speaker, dict):
             return
-        address = normalize_address(str(speaker.get("address", "")))
+        address = normalize_address(str(speaker.get(PAYLOAD_ADDRESS_KEY, "")))
         if address is None or address not in self.speakers:
             return
         _LOGGER.debug("Evicting speaker %s (live event no longer matches the trusted-sink filter)", address)
