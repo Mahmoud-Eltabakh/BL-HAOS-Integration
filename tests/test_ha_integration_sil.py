@@ -67,6 +67,49 @@ async def test_snapshot_creation_loads_authoritative_speakers(hass, bridge_sessi
     assert entry.runtime_data.client.token == TOKEN
 
 
+async def test_media_player_publishes_the_playback_timeline(hass, bridge_session):
+    """HA renders its progress bar from the position/duration the bridge pushes."""
+    entry = await _setup_entry(hass, bridge_session)
+    client = entry.runtime_data.client
+    speakers = load_snapshot("speakers_initial.json")
+    speakers["speakers"]["aa:bb:cc:dd:ee:01"]["playback"] = {
+        "state": "playing",
+        "volume": 0.42,
+        "position": 12.5,
+        "duration": 240.0,
+        "position_updated_at": 1790300000.0,
+    }
+    bridge_session.speakers = speakers
+
+    await client._async_refresh_snapshot(bridge_session)
+    await hass.async_block_till_done()
+
+    player = hass.data["entity_components"]["media_player"].get_entity("media_player.kitchen_speaker")
+    assert player.media_position == 12
+    assert player.media_duration == 240
+    assert player.media_position_updated_at.timestamp() == 1790300000.0
+
+    state = hass.states.get("media_player.kitchen_speaker")
+    assert state.state == "playing"
+    assert state.attributes["media_position"] == 12
+    assert state.attributes["media_duration"] == 240
+
+
+async def test_media_player_without_a_timeline_reports_no_progress(hass, bridge_session):
+    """A bridge that sends no timeline must not show a misleading progress bar."""
+    await _setup_entry(hass, bridge_session)
+
+    player = hass.data["entity_components"]["media_player"].get_entity("media_player.office_speaker")
+    assert player.media_position is None
+    assert player.media_duration is None
+    assert player.media_position_updated_at is None
+
+    state = hass.states.get("media_player.office_speaker")
+    assert state.state == "playing"
+    assert "media_position" not in state.attributes
+    assert "media_duration" not in state.attributes
+
+
 async def test_snapshot_eviction_removes_stale_entity_and_keeps_remaining(hass, bridge_session):
     entry = await _setup_entry(hass, bridge_session)
     client = entry.runtime_data.client

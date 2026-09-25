@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
+from datetime import datetime, timezone
 
 import aiohttp
 from homeassistant.components.media_player import (
@@ -114,6 +115,11 @@ class BLHAOSMediaPlayer(MediaPlayerEntity):
         return self._client.get_speaker(self._address) or {}
 
     @property
+    def _playback(self) -> dict:
+        playback = self._speaker.get("playback")
+        return playback if isinstance(playback, dict) else {}
+
+    @property
     def name(self) -> str:
         return self._speaker.get("name", self._address)
 
@@ -127,13 +133,33 @@ class BLHAOSMediaPlayer(MediaPlayerEntity):
         """Return the state of the device."""
         if not self._speaker.get("connected"):
             return MediaPlayerState.OFF
-        bridge_state = self._speaker.get("playback", {}).get("state", MediaPlayerState.IDLE)
+        bridge_state = self._playback.get("state", MediaPlayerState.IDLE)
         valid_states = {MediaPlayerState.IDLE, MediaPlayerState.PLAYING, MediaPlayerState.PAUSED}
         return bridge_state if bridge_state in valid_states else MediaPlayerState.IDLE
 
     @property
     def volume_level(self) -> float | None:
-        return self._speaker.get("playback", {}).get("volume")
+        return self._playback.get("volume")
+
+    @property
+    def media_position(self) -> int | None:
+        """Elapsed playback time so Home Assistant can draw a progress bar."""
+        position = self._playback.get("position")
+        return int(position) if isinstance(position, (int, float)) else None
+
+    @property
+    def media_position_updated_at(self) -> datetime | None:
+        """Timestamp the reported position belongs to; HA extrapolates from here."""
+        updated = self._playback.get("position_updated_at")
+        if not isinstance(updated, (int, float)):
+            return None
+        return datetime.fromtimestamp(updated, tz=timezone.utc)
+
+    @property
+    def media_duration(self) -> int | None:
+        """Total media length in seconds, once the bridge has probed it."""
+        duration = self._playback.get("duration")
+        return int(duration) if isinstance(duration, (int, float)) and duration > 0 else None
 
     @property
     def device_info(self) -> DeviceInfo:
