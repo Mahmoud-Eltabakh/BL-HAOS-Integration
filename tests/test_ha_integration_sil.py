@@ -78,6 +78,8 @@ async def test_media_player_publishes_the_playback_timeline(hass, bridge_session
         "position": 12.5,
         "duration": 240.0,
         "position_updated_at": 1790300000.0,
+        "title": "04.athan mishary",
+        "artist": "Malek Chibat Al-Hamd",
     }
     bridge_session.speakers = speakers
 
@@ -88,11 +90,15 @@ async def test_media_player_publishes_the_playback_timeline(hass, bridge_session
     assert player.media_position == 12
     assert player.media_duration == 240
     assert player.media_position_updated_at.timestamp() == 1790300000.0
+    assert player.media_title == "04.athan mishary"
+    assert player.media_artist == "Malek Chibat Al-Hamd"
 
     state = hass.states.get("media_player.kitchen_speaker")
     assert state.state == "playing"
     assert state.attributes["media_position"] == 12
     assert state.attributes["media_duration"] == 240
+    assert state.attributes["media_title"] == "04.athan mishary"
+    assert state.attributes["media_artist"] == "Malek Chibat Al-Hamd"
 
 
 async def test_media_player_without_a_timeline_reports_no_progress(hass, bridge_session):
@@ -103,11 +109,14 @@ async def test_media_player_without_a_timeline_reports_no_progress(hass, bridge_
     assert player.media_position is None
     assert player.media_duration is None
     assert player.media_position_updated_at is None
+    assert player.media_title is None
+    assert player.media_artist is None
 
     state = hass.states.get("media_player.office_speaker")
     assert state.state == "playing"
     assert "media_position" not in state.attributes
     assert "media_duration" not in state.attributes
+    assert "media_title" not in state.attributes
 
 
 async def test_snapshot_eviction_removes_stale_entity_and_keeps_remaining(hass, bridge_session):

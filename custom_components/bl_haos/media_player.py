@@ -162,6 +162,18 @@ class BLHAOSMediaPlayer(MediaPlayerEntity):
         return int(duration) if isinstance(duration, (int, float)) and duration > 0 else None
 
     @property
+    def media_title(self) -> str | None:
+        """Name of the stream being played, so Home Assistant can label it."""
+        title = self._playback.get("title")
+        return title if isinstance(title, str) and title.strip() else None
+
+    @property
+    def media_artist(self) -> str | None:
+        """Embedded artist tag when the media carries one."""
+        artist = self._playback.get("artist")
+        return artist if isinstance(artist, str) and artist.strip() else None
+
+    @property
     def device_info(self) -> DeviceInfo:
         return DeviceInfo(
             identifiers={(DOMAIN, self._address)},
