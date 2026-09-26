@@ -139,6 +139,35 @@ async def test_snapshot_eviction_removes_stale_entity_and_keeps_remaining(hass, 
     assert set(_media_players(hass)) == {"media_player.kitchen_speaker"}
 
 
+async def test_offline_speaker_keeps_its_entity_and_goes_unavailable(hass, bridge_session):
+    """A speaker that is switched off must go unavailable, not disappear.
+
+    The bridge keeps publishing a trusted speaker while it is offline, with
+    ``available: false``. The entity has to stay registered - so scripts,
+    history and dashboards keep their identity - and recover on its own when the
+    speaker comes back, which a removed snapshot entry never could.
+    """
+    entry = await _setup_entry(hass, bridge_session)
+    client = entry.runtime_data.client
+    bridge_session.speakers = load_snapshot("speakers_offline.json")
+
+    await client._async_refresh_snapshot(bridge_session)
+    await hass.async_block_till_done()
+
+    assert "aa:bb:cc:dd:ee:01" in client.speakers
+    states = _media_players(hass)
+    assert set(states) == {"media_player.kitchen_speaker", "media_player.office_speaker"}
+    assert states["media_player.kitchen_speaker"].state == "unavailable"
+    assert states["media_player.office_speaker"].state == "playing"
+
+    # Switched back on: the same entity reports its state again.
+    bridge_session.speakers = load_snapshot("speakers_initial.json")
+    await client._async_refresh_snapshot(bridge_session)
+    await hass.async_block_till_done()
+
+    assert hass.states.get("media_player.kitchen_speaker").state != "unavailable"
+
+
 async def test_config_flow_accepts_identity_and_rejects_bad_connection(hass, bridge_session):
     client_patch, flow_patch = _patch_session(bridge_session)
     with client_patch, flow_patch:

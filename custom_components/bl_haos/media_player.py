@@ -42,6 +42,7 @@ from .const import (
     NO_ACTIVE_PLAYBACK_MARKER,
     PAYLOAD_ADAPTER_KEY,
     PAYLOAD_ARTIST_KEY,
+    PAYLOAD_AVAILABLE_KEY,
     PAYLOAD_CONNECTED_KEY,
     PAYLOAD_DURATION_KEY,
     PAYLOAD_NAME_KEY,
@@ -151,8 +152,15 @@ class BLHAOSMediaPlayer(MediaPlayerEntity):
 
     @property
     def available(self) -> bool:
-        """Entity is available as long as the native bridge transport is alive."""
-        return self._client.transport_available
+        """Bridge reachability *and* the speaker's own availability.
+
+        The bridge keeps publishing a trusted speaker while it is switched off,
+        with ``available: false``. The entity must then read as unavailable
+        rather than reporting a stale state - and, unlike a removed snapshot
+        entry, it stays registered so scripts, history and dashboards keep their
+        identity and it recovers by itself when the speaker returns.
+        """
+        return self._client.transport_available and bool(self._speaker.get(PAYLOAD_AVAILABLE_KEY, True))
 
     @property
     def state(self):

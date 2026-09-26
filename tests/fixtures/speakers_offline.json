@@ -1,0 +1,24 @@
+{
+  "speakers": {
+    "aa:bb:cc:dd:ee:01": {
+      "address": "AA-BB-CC-DD-EE-01",
+      "name": "Kitchen Speaker",
+      "available": false,
+      "connected": false,
+      "trusted": true,
+      "is_audio_sink": true,
+      "adapter": "hci0",
+      "playback": {"state": "idle", "volume": 0.42}
+    },
+    "aa:bb:cc:dd:ee:02": {
+      "address": "AA:BB:CC:DD:EE:02",
+      "name": "Office Speaker",
+      "available": true,
+      "connected": true,
+      "paired": true,
+      "is_audio_sink": true,
+      "adapter": "hci1",
+      "playback": {"state": "playing", "volume": 0.68}
+    }
+  }
+}
