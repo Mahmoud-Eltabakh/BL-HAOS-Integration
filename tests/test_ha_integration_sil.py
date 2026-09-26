@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -192,6 +193,34 @@ async def test_unpaired_speaker_entity_is_removed(hass, bridge_session):
     registry = er.async_get(hass)
     assert registry.async_get("media_player.kitchen_speaker") is None
     assert registry.async_get("media_player.office_speaker").disabled_by is None
+
+
+async def test_operator_disabled_entity_is_never_written_to(hass, bridge_session, caplog):
+    """An entity the operator disabled is left alone, and not written to.
+
+    Home Assistant removes a disabled entity from the platform, so a state write
+    for it is an integration bug - Home Assistant reports it as
+    "incorrectly being triggered for updates while it is disabled". A speaker
+    update must skip it entirely and leave the operator's choice alone.
+    """
+    entry = await _setup_entry(hass, bridge_session)
+    client = entry.runtime_data.client
+    registry = er.async_get(hass)
+    registry.async_update_entity(
+        "media_player.kitchen_speaker", disabled_by=er.RegistryEntryDisabler.USER
+    )
+    await hass.async_block_till_done()
+
+    caplog.set_level(logging.WARNING, logger="homeassistant.helpers.entity")
+    bridge_session.speakers = load_snapshot("speakers_offline.json")
+    await client._async_refresh_snapshot(bridge_session)
+    bridge_session.speakers = load_snapshot("speakers_initial.json")
+    await client._async_refresh_snapshot(bridge_session)
+    await hass.async_block_till_done()
+
+    assert registry.async_get("media_player.kitchen_speaker").disabled_by == er.RegistryEntryDisabler.USER
+    assert hass.states.get("media_player.kitchen_speaker") is None
+    assert "incorrectly being triggered for updates while it is disabled" not in caplog.text
 
 
 async def test_paired_offline_speaker_has_no_entity_until_it_connects(hass, bridge_session):

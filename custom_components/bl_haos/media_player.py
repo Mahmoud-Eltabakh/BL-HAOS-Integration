@@ -114,6 +114,13 @@ async def async_setup_entry(
             _LOGGER.debug("Enabling media player entity %s (speaker is connected)", entity_id)
             registry.async_update_entity(entity_id, disabled_by=None)
         entity = speakers.get(address)
+        if entity is not None and registered is not None and registered.disabled_by is not None:
+            # The operator disabled this entity themselves. Home Assistant removed
+            # it from the platform, so the cached object is stale - writing a state
+            # for it would be exactly the "triggered for updates while it is
+            # disabled" bug. It is rebuilt if the entity is enabled again.
+            speakers.pop(address, None)
+            return
         if entity is not None:
             _LOGGER.debug("Updating existing media player entity for speaker %s", address)
             entity.async_write_ha_state()
