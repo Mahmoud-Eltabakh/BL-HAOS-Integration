@@ -78,6 +78,11 @@ def _normalize_media_type(media_type: str | None) -> str | None:
     return candidate.lower()
 
 
+def entity_unique_id(address: str) -> str:
+    """Return the entity-registry unique id of one speaker's media player."""
+    return f"{DOMAIN}_{address.replace(':', '')}"
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -86,6 +91,7 @@ async def async_setup_entry(
     """Set up cached BL-HAOS speakers and subscribe for native updates."""
     client: BLHAOSClient = entry.runtime_data.client
     speakers: dict[str, BLHAOSMediaPlayer] = {}
+    registry = er.async_get(hass)
     _LOGGER.debug(
         "Setting up BL-HAOS media player platform for entry %s (%d initial speakers: %s)",
         entry.entry_id,
@@ -93,52 +99,69 @@ async def async_setup_entry(
         list(client.speakers.keys()),
     )
 
-    def _add_speaker(address: str, *, disabled: bool = False) -> None:
-        existing = speakers.get(address)
-        if existing is not None:
-            if not disabled:
-                _LOGGER.debug("Updating existing media player entity for speaker %s", address)
-                existing.async_write_ha_state()
+    def _registered_entity_id(address: str) -> str | None:
+        """Return the entity id Home Assistant registered for one speaker."""
+        return registry.async_get_entity_id(MEDIA_PLAYER_DOMAIN, DOMAIN, entity_unique_id(address))
+
+    def _add_speaker(address: str) -> None:
+        """Add, or refresh, the entity of a speaker that belongs in Home Assistant."""
+        entity_id = _registered_entity_id(address)
+        registered = registry.async_get(entity_id) if entity_id is not None else None
+        if registered is not None and registered.disabled_by == er.RegistryEntryDisabler.INTEGRATION:
+            # Home Assistant drops an entity from the platform as soon as its
+            # registry entry is disabled and never brings it back by itself, so
+            # clearing the flag here is what makes the entity reappear.
+            _LOGGER.debug("Enabling media player entity %s (speaker is connected)", entity_id)
+            registry.async_update_entity(entity_id, disabled_by=None)
+        entity = speakers.get(address)
+        if entity is not None:
+            _LOGGER.debug("Updating existing media player entity for speaker %s", address)
+            entity.async_write_ha_state()
             return
         entity = BLHAOSMediaPlayer(client, address)
         speakers[address] = entity
         _LOGGER.debug("Adding new media player entity for speaker %s (%s)", address, entity.name)
         async_add_entities([entity])
 
-    def _remove_speaker(address: str) -> None:
-        entity = speakers.pop(address, None)
-        if entity is None:
-            return
-        _LOGGER.debug("Removing the media player entity of speaker %s", address)
-        hass.async_create_task(entity.async_remove(force_remove=True))
+    def _disable_speaker(address: str) -> None:
+        """Disable the entity of a speaker that is paired but not connected.
 
-    def _sync_disabled_state(entity: BLHAOSMediaPlayer, *, disabled: bool) -> None:
-        """Keep the entity's registry state in step with the speaker's link.
-
-        A speaker that is paired but switched off is disabled rather than
-        removed: it leaves the state machine without losing its identity, and it
-        is enabled again the moment the speaker connects. Only a disable this
-        integration applied is cleared - an entity the operator disabled by hand
-        stays disabled.
+        The registry entry is kept - name, identity and history survive - and
+        disabled, which takes the entity out of the platform and the state
+        machine. The cached entity object goes with it, because Home Assistant
+        removed it: the entity is built from scratch when the speaker returns.
         """
-        registry = er.async_get(hass)
-        entity_id = registry.async_get_entity_id(MEDIA_PLAYER_DOMAIN, DOMAIN, entity.unique_id)
+        speakers.pop(address, None)
+        entity_id = _registered_entity_id(address)
+        registered = registry.async_get(entity_id) if entity_id is not None else None
+        if registered is None:
+            return
+        if registered.disabled_by is None:
+            _LOGGER.debug("Disabling media player entity %s (speaker is paired but not connected)", entity_id)
+            registry.async_update_entity(entity_id, disabled_by=er.RegistryEntryDisabler.INTEGRATION)
+        # The state goes with it: a disabled entity must not leave a card behind.
+        hass.states.async_remove(entity_id)
+
+    def _remove_speaker(address: str) -> None:
+        """Remove a speaker's entity, its state and its registry entry."""
+        entity = speakers.pop(address, None)
+        entity_id = entity.entity_id if entity is not None else _registered_entity_id(address)
         if entity_id is None:
             return
-        entry = registry.async_get(entity_id)
-        if entry is None:
-            return
-        if disabled:
-            if entry.disabled_by is None:
-                _LOGGER.debug("Disabling media player entity %s (speaker is paired but not connected)", entity_id)
-                registry.async_update_entity(entity_id, disabled_by=er.RegistryEntryDisabler.INTEGRATION)
-            # A disabled entity must not leave a state behind, or dashboards keep
-            # showing a dead card for a speaker that is not connected.
-            hass.states.async_remove(entity_id)
-            return
-        if entry.disabled_by == er.RegistryEntryDisabler.INTEGRATION:
-            _LOGGER.debug("Enabling media player entity %s (speaker is connected)", entity_id)
-            registry.async_update_entity(entity_id, disabled_by=None)
+        _LOGGER.debug("Removing media player entity %s of speaker %s", entity_id, address)
+        hass.async_create_task(_async_remove_entity(entity, entity_id))
+
+    async def _async_remove_entity(entity: BLHAOSMediaPlayer | None, entity_id: str) -> None:
+        """Remove one entity completely.
+
+        ``Entity.async_remove(force_remove=True)`` only clears the state, so the
+        registry entry would stay behind as an orphan that Home Assistant shows
+        again after a restart. Deleting the entry as well is what "the speaker is
+        gone" has to mean.
+        """
+        if entity is not None:
+            await entity.async_remove(force_remove=True)
+        registry.async_remove(entity_id)
 
     @callback
     def async_discover_speaker(address: str) -> None:
@@ -152,18 +175,20 @@ async def async_setup_entry(
             _LOGGER.debug("Speaker %s is no longer paired; removing its media player entity", address)
             _remove_speaker(address)
             return
-        if desired == ENTITY_DISABLED and address not in speakers:
-            # Nothing to disable: a speaker that has not connected since this
-            # entry was set up has no entity yet. It gets one when it connects.
-            _LOGGER.debug("Speaker %s is paired but not connected; no entity exists yet", address)
+        if desired == ENTITY_DISABLED:
+            if address in speakers or _registered_entity_id(address) is not None:
+                _disable_speaker(address)
+            else:
+                # A speaker that has not connected since this entry was set up has
+                # no entity yet; it gets one when it connects.
+                _LOGGER.debug("Speaker %s is paired but not connected; no entity exists yet", address)
             return
         _LOGGER.debug("Discovered / refreshed speaker %s", address)
-        _add_speaker(address, disabled=desired == ENTITY_DISABLED)
-        _sync_disabled_state(speakers[address], disabled=desired == ENTITY_DISABLED)
+        _add_speaker(address)
 
     # Seed the platform through the same policy the listener uses, so a speaker
-    # that is paired but offline is disabled (not created, if it has no entity
-    # yet) exactly as it would be on the next update.
+    # that is paired but offline is disabled (or never created, if it has no
+    # entity yet) exactly as it would be on the next update.
     for address in list(client.speakers):
         async_discover_speaker(address)
     entry.async_on_unload(client.async_add_listener(async_discover_speaker))
@@ -188,7 +213,7 @@ class BLHAOSMediaPlayer(MediaPlayerEntity):
         """Initialize a native media player for one Bluetooth speaker."""
         self._client = client
         self._address = normalize_address(address)
-        self._attr_unique_id = f"{DOMAIN}_{self._address.replace(':', '')}"
+        self._attr_unique_id = entity_unique_id(self._address)
 
     @property
     def _speaker(self) -> dict:
