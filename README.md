@@ -12,14 +12,24 @@ Each speaker entity supports Home Assistant's media browser (`BROWSE_MEDIA`), so
 
 The integration derives the add-on's private hostname from Supervisor discovery, validates `GET /api/native/identity`, then reads `GET /api/native/speakers` and listens on `/ws/native` for updates. The Bridge add-on pushes its native token and configured `log_level` through the same Supervisor discovery message, so discovered integration logging stays synchronized with the add-on without changing Home Assistant's global logger. Existing entries refresh these values and reload themselves when the add-on rotates its token or changes log level. A manual local endpoint and token entry are available only as a fallback; manually configured entries default to `info`.
 
-## Speakers that are switched off
+## Speakers that are switched off, and speakers that are gone
 
-A trusted speaker that is switched off (or out of range) keeps its entity instead
-of losing it: the add-on keeps publishing it with `available: false` (its BlueZ
-record is retained, not rebuilt), the entity reads `unavailable` while the speaker
-is away, and the same entity - with its history, automations and dashboard cards -
-comes back when the speaker does. Only removing the speaker in the add-on, or
-losing its trust, removes the entity.
+A trusted speaker that is switched off (or out of range) keeps its identity but
+is **disabled**: the add-on keeps publishing it with `connected: false` and
+`paired: true`, the entity leaves the state machine (no dead card, and no
+automation target that silently fails) while its name, history and dashboard
+identity are kept, and the same entity is enabled again by itself when the
+speaker comes back.
+
+A speaker that is no longer paired has its entity **removed completely**: BlueZ
+withdraws the device object of anything it treats as temporary - which is every
+device that is not paired - and the add-on reports that as `detached: true`. The
+entity is built from scratch if you pair the speaker again. Removing the speaker
+in the add-on, or losing its trust, removes the entity the same way.
+
+An add-on that predates these fields (no `paired`/`detached` in the record)
+leaves the entity alone, so an older Bridge cannot make Home Assistant remove
+entities it knows nothing about.
 
 ## Security
 

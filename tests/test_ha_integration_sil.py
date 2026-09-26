@@ -139,33 +139,68 @@ async def test_snapshot_eviction_removes_stale_entity_and_keeps_remaining(hass, 
     assert set(_media_players(hass)) == {"media_player.kitchen_speaker"}
 
 
-async def test_offline_speaker_keeps_its_entity_and_goes_unavailable(hass, bridge_session):
-    """A speaker that is switched off must go unavailable, not disappear.
+async def test_offline_paired_speaker_entity_is_disabled_until_it_returns(hass, bridge_session):
+    """A paired speaker that is switched off has its entity disabled, not removed.
 
     The bridge keeps publishing a trusted speaker while it is offline, with
-    ``available: false``. The entity has to stay registered - so scripts,
-    history and dashboards keep their identity - and recover on its own when the
-    speaker comes back, which a removed snapshot entry never could.
+    ``connected: false`` and ``paired: true`` (BlueZ keeps a paired device). The
+    entity must leave the state machine - so no dead card, and no automation
+    target that silently fails - while keeping its identity, and it has to come
+    back by itself when the speaker does, which a removed entity never could.
     """
     entry = await _setup_entry(hass, bridge_session)
     client = entry.runtime_data.client
+    registry = er.async_get(hass)
     bridge_session.speakers = load_snapshot("speakers_offline.json")
 
     await client._async_refresh_snapshot(bridge_session)
     await hass.async_block_till_done()
 
     assert "aa:bb:cc:dd:ee:01" in client.speakers
-    states = _media_players(hass)
-    assert set(states) == {"media_player.kitchen_speaker", "media_player.office_speaker"}
-    assert states["media_player.kitchen_speaker"].state == "unavailable"
-    assert states["media_player.office_speaker"].state == "playing"
+    offline = registry.async_get("media_player.kitchen_speaker")
+    assert offline is not None, "the entity keeps its identity while the speaker is away"
+    assert offline.disabled_by == er.RegistryEntryDisabler.INTEGRATION
+    assert hass.states.get("media_player.kitchen_speaker") is None
+    assert hass.states.get("media_player.office_speaker").state == "playing"
 
-    # Switched back on: the same entity reports its state again.
+    # Switched back on: the same entity is enabled again and reports its state.
     bridge_session.speakers = load_snapshot("speakers_initial.json")
     await client._async_refresh_snapshot(bridge_session)
     await hass.async_block_till_done()
 
+    assert registry.async_get("media_player.kitchen_speaker").disabled_by is None
     assert hass.states.get("media_player.kitchen_speaker").state != "unavailable"
+
+
+async def test_unpaired_speaker_entity_is_removed(hass, bridge_session):
+    """Losing the pairing removes the entity completely.
+
+    BlueZ withdraws the device object of anything it treats as temporary, which
+    is every device that is not paired; the bridge reports that as
+    ``detached: true``. The speaker is still trusted (the operator still owns
+    it), but only a paired speaker is a media player in Home Assistant.
+    """
+    entry = await _setup_entry(hass, bridge_session)
+    client = entry.runtime_data.client
+    bridge_session.speakers = load_snapshot("speakers_unpaired.json")
+
+    await client._async_refresh_snapshot(bridge_session)
+    await hass.async_block_till_done()
+
+    assert "aa:bb:cc:dd:ee:01" in client.speakers
+    assert set(_media_players(hass)) == {"media_player.office_speaker"}
+    registry = er.async_get(hass)
+    assert registry.async_get("media_player.kitchen_speaker") is None
+    assert registry.async_get("media_player.office_speaker").disabled_by is None
+
+
+async def test_paired_offline_speaker_has_no_entity_until_it_connects(hass, bridge_session):
+    """A speaker that has never connected gets no entity while it is offline."""
+    bridge_session.speakers = load_snapshot("speakers_offline.json")
+    await _setup_entry(hass, bridge_session)
+
+    assert set(_media_players(hass)) == {"media_player.office_speaker"}
+    assert er.async_get(hass).async_get("media_player.kitchen_speaker") is None
 
 
 async def test_config_flow_accepts_identity_and_rejects_bad_connection(hass, bridge_session):

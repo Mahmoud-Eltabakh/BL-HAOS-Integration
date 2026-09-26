@@ -17,6 +17,9 @@ NATIVE_API_PATH = "/api/native"
 HEALTH_API_PATH = "/api/health"
 BRIDGE_SERVICE_NAME = "BL-HAOS"
 PLATFORMS = ("media_player",)
+# The Home Assistant domain this integration registers entities in, used for
+# entity-registry lookups (the platform name, not the integration's DOMAIN).
+MEDIA_PLAYER_DOMAIN = "media_player"
 INTEGRATION_LOGGER = "custom_components.bl_haos"
 LOG_LEVEL_MAP = {"trace": "debug", "notice": "info", "fatal": "critical"}
 
@@ -80,6 +83,9 @@ PAYLOAD_ARTIST_KEY = "artist"
 PAYLOAD_IS_AUDIO_SINK_KEY = "is_audio_sink"
 PAYLOAD_TRUSTED_KEY = "trusted"
 PAYLOAD_PAIRED_KEY = "paired"
+# True when BlueZ withdrew the device object: a device BlueZ treats as temporary
+# is one that is not paired, so the bridge keeps its record but flags it.
+PAYLOAD_DETACHED_KEY = "detached"
 PAYLOAD_CONNECTED_KEY = "connected"
 PAYLOAD_AVAILABLE_KEY = "available"
 ERROR_CODE_INVALID_TOKEN = "invalid_token"

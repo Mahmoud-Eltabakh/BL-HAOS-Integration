@@ -5,6 +5,8 @@
       "name": "Kitchen Speaker",
       "available": true,
       "connected": true,
+      "paired": true,
+      "detached": false,
       "trusted": true,
       "is_audio_sink": true,
       "adapter": "hci0",
