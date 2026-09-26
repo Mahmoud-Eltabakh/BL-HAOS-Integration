@@ -11,6 +11,11 @@ CONF_LOG_LEVEL = "log_level"
 BRIDGE_UNIQUE_ID = "bl_haos_native_bridge"
 BRIDGE_ID = "bl_haos_native_bridge"
 NATIVE_API_PATH = "/api/native"
+# Unauthenticated identification endpoint. The integration checks this *before* it
+# presents the native token, so a hostile or mistyped endpoint never receives the
+# credential (see THREAT-MODEL.md, T4).
+HEALTH_API_PATH = "/api/health"
+BRIDGE_SERVICE_NAME = "BL-HAOS"
 PLATFORMS = ("media_player",)
 INTEGRATION_LOGGER = "custom_components.bl_haos"
 LOG_LEVEL_MAP = {"trace": "debug", "notice": "info", "fatal": "critical"}
@@ -56,6 +61,7 @@ PAYLOAD_DATA_KEY = "data"
 PAYLOAD_SPEAKERS_KEY = "speakers"
 PAYLOAD_ADDRESS_KEY = "address"
 PAYLOAD_BRIDGE_ID_KEY = "bridge_id"
+PAYLOAD_SERVICE_KEY = "service"
 PAYLOAD_DETAIL_KEY = "detail"
 PAYLOAD_ERROR_KEY = "error"
 PAYLOAD_ERROR_CODE_KEY = "error_code"

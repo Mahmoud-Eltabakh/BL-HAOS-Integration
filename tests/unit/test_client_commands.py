@@ -39,9 +39,14 @@ def _client(session: FakeSession) -> tuple[BLHAOSClient, object]:
 
 
 def _stub_loop_task(client: BLHAOSClient) -> None:
-    """Prevent async_initialize from starting a real listener task."""
+    """Prevent async_initialize from starting a real listener task.
 
-    async def no_task(coro, name=None):
+    The stub is synchronous on purpose: an ``async def`` stub would return a
+    coroutine nobody awaits, and the listener coroutine it receives would never be
+    closed - two "coroutine was never awaited" leaks per call.
+    """
+
+    def no_task(coro, name=None):
         coro.close()
         return AsyncMock()
 

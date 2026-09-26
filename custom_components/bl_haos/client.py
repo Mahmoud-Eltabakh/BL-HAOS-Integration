@@ -20,6 +20,7 @@ from .const import (
     AUTH_FAILURE_MARKER,
     BEARER_PREFIX,
     BRIDGE_ID,
+    BRIDGE_SERVICE_NAME,
     COMMAND_ATTEMPTS,
     COMMAND_RETRY_DELAY_SECONDS,
     COMMAND_TIMEOUT_SECONDS,
@@ -27,6 +28,8 @@ from .const import (
     CONNECTION_DROPPED_MARKER,
     ERROR_CODE_INVALID_TOKEN,
     EVENT_SPEAKER_UPDATED,
+    HEALTH_API_PATH,
+    IDENTITY_TIMEOUT_SECONDS,
     NATIVE_API_PATH,
     PAYLOAD_ADDRESS_KEY,
     PAYLOAD_AVAILABLE_KEY,
@@ -41,6 +44,7 @@ from .const import (
     PAYLOAD_OPERATION_KEY,
     PAYLOAD_PAIRED_KEY,
     PAYLOAD_PLAYBACK_KEY,
+    PAYLOAD_SERVICE_KEY,
     PAYLOAD_SPEAKERS_KEY,
     PAYLOAD_STATE_KEY,
     PAYLOAD_TRUSTED_KEY,
@@ -54,6 +58,7 @@ from .const import (
 
 _MAC_ADDRESS = re.compile(r"^[0-9a-f]{2}(?::[0-9a-f]{2}){5}$")
 _COMMAND_TIMEOUT = aiohttp.ClientTimeout(total=COMMAND_TIMEOUT_SECONDS)
+_IDENTITY_TIMEOUT = aiohttp.ClientTimeout(total=IDENTITY_TIMEOUT_SECONDS)
 _LOGGER = logging.getLogger(__name__)
 # The add-on restarts on every add-on update, config change, or Supervisor
 # restart, and each restart drops the event stream. Logging every retry turns a
@@ -124,6 +129,7 @@ class BLHAOSClient:
         """Validate identity, cache the snapshot, and start event updates."""
         _LOGGER.debug("Initializing BL-HAOS client at %s", self.endpoint)
         session = async_get_clientsession(self.hass)
+        await self._async_require_bridge_identity(session)
         async with session.get(f"{self.endpoint}{NATIVE_API_PATH}/identity", headers=self._headers) as response:
             identity = await response.json(content_type=None)
             if response.status != HTTPStatus.OK or not isinstance(identity, dict) or identity.get(PAYLOAD_BRIDGE_ID_KEY) != BRIDGE_ID:
@@ -143,6 +149,27 @@ class BLHAOSClient:
                 self._websocket_task = create_background_task(self._async_listen(), name="bl_haos_websocket")
             else:
                 self._websocket_task = self.hass.async_create_task(self._async_listen())
+
+    async def _async_require_bridge_identity(self, session: aiohttp.ClientSession) -> None:
+        """Confirm the endpoint is a BL-HAOS bridge before the token is presented.
+
+        The endpoint comes from Supervisor discovery or a stored entry. If the
+        add-on is gone and something else answers on its hostname, an
+        unconditional identity request would hand that stranger the credential.
+        `/api/health` needs no credentials and names the service, so this costs one
+        request and removes the disclosure (see THREAT-MODEL.md, T4).
+        """
+        async with session.get(f"{self.endpoint}{HEALTH_API_PATH}", timeout=_IDENTITY_TIMEOUT) as response:
+            payload = await response.json(content_type=None)
+            if (
+                response.status != HTTPStatus.OK
+                or not isinstance(payload, dict)
+                or payload.get(PAYLOAD_SERVICE_KEY) != BRIDGE_SERVICE_NAME
+            ):
+                raise aiohttp.ClientError(
+                    "Endpoint did not identify as a BL-HAOS bridge; the token was not sent"
+                )
+        _LOGGER.debug("Endpoint %s identified as %s before credentials", self.endpoint, BRIDGE_SERVICE_NAME)
 
     async def _async_refresh_snapshot(self, session: aiohttp.ClientSession) -> None:
         _LOGGER.debug("Refreshing speakers snapshot from %s%s", self.endpoint, NATIVE_API_PATH)

@@ -78,6 +78,8 @@ class FakeSession:
     def __init__(self, speakers: dict[str, Any]) -> None:
         self.speakers = speakers
         self.identity = {"bridge_id": "bl_haos_native_bridge", "version": 1}
+        self.health = {"status": "ok", "service": "BL-HAOS", "dbus_connected": True}
+        self.get_calls: list[tuple[str, dict[str, Any]]] = []
         self.websocket_available = True
         self.websocket_messages: list[Any] = []
         self.last_ws_url: str | None = None
@@ -86,6 +88,9 @@ class FakeSession:
         self.command_status: int = 200
 
     def get(self, url: str, **kwargs: Any) -> FakeResponse:
+        self.get_calls.append((url, kwargs))
+        if url.endswith("/api/health"):
+            return FakeResponse(self.health)
         if url.endswith("/identity"):
             return FakeResponse(self.identity)
         if url.endswith("/speakers"):

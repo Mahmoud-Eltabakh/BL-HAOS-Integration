@@ -14,6 +14,7 @@ from .const import (
     ADDON_SLUG,
     BEARER_PREFIX,
     BRIDGE_ID,
+    BRIDGE_SERVICE_NAME,
     BRIDGE_UNIQUE_ID,
     CONF_ENDPOINT,
     CONF_LOG_LEVEL,
@@ -25,10 +26,12 @@ from .const import (
     ENDPOINT_SCHEME_NAMES,
     ENDPOINT_SCHEMES,
     ENTRY_TITLE,
+    HEALTH_API_PATH,
     HTTP_SCHEME_PREFIX,
     IDENTITY_TIMEOUT_SECONDS,
     NATIVE_API_PATH,
     PAYLOAD_BRIDGE_ID_KEY,
+    PAYLOAD_SERVICE_KEY,
     get_logger,
     normalize_log_level,
 )
@@ -74,11 +77,35 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return None
         return f"{HTTP_SCHEME_PREFIX}{slug.replace('_', '-')}:{DEFAULT_PORT}"
 
+    async def _async_bridge_identity(self, target: str) -> bool:
+        """Whether the endpoint introduces itself as a BL-HAOS bridge.
+
+        Checked *before* the bearer token is attached: the endpoint is derived from
+        a discovery payload or from operator input, and an identity request that
+        already carries the credential cannot protect it (see THREAT-MODEL.md, T4).
+        """
+        async with async_get_clientsession(self.hass).get(
+            f"{target}{HEALTH_API_PATH}",
+            timeout=aiohttp.ClientTimeout(total=IDENTITY_TIMEOUT_SECONDS),
+        ) as response:
+            payload = await response.json(content_type=None)
+            return (
+                response.status == HTTPStatus.OK
+                and isinstance(payload, dict)
+                and payload.get(PAYLOAD_SERVICE_KEY) == BRIDGE_SERVICE_NAME
+            )
+
     async def _async_validate_connection(self, endpoint: str, token: str) -> bool:
         """Validate the native bridge identity before storing an entry."""
         for target in (endpoint, endpoint.replace("_", "-")):
             try:
                 _LOGGER.debug("Validating bridge connection to endpoint: %s", target)
+                if not await self._async_bridge_identity(target):
+                    _LOGGER.debug(
+                        "Endpoint %s did not identify as a BL-HAOS bridge; the token was not sent",
+                        target,
+                    )
+                    continue
                 async with async_get_clientsession(self.hass).get(
                     f"{target}{NATIVE_API_PATH}/identity",
                     headers={"Authorization": f"{BEARER_PREFIX}{token}"},
