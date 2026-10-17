@@ -24,9 +24,12 @@ from .const import (
     get_logger,
 )
 
+from .call_trace import trace_call
+
 _LOGGER = get_logger(__name__)
 
 
+@trace_call
 async def async_get_config_entry_diagnostics(
     hass: HomeAssistant, entry: ConfigEntry
 ) -> dict[str, Any]:

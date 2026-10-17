@@ -37,6 +37,8 @@ from .const import (
 )
 from http import HTTPStatus
 
+from .call_trace import trace_call
+
 _LOGGER = get_logger(__name__)
 
 
@@ -46,6 +48,7 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = CONFIG_ENTRY_VERSION
 
     @staticmethod
+    @trace_call
     def _validate_endpoint(endpoint: str) -> str | None:
         """Normalize a local HTTP(S) endpoint to scheme://host:port."""
         endpoint = str(endpoint or "").strip()
@@ -71,12 +74,14 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return f"{parsed.scheme}://{host_part}:{port}"
 
     @staticmethod
+    @trace_call
     def _endpoint_from_hassio_slug(slug: str) -> str | None:
         """Derive the Supervisor-private add-on hostname from its slug."""
         if not (ADDON_SLUG in slug or slug.endswith(ADDON_HOSTNAME_SLUG)):
             return None
         return f"{HTTP_SCHEME_PREFIX}{slug.replace('_', '-')}:{DEFAULT_PORT}"
 
+    @trace_call
     async def _async_bridge_identity(self, target: str) -> bool:
         """Whether the endpoint introduces itself as a BL-HAOS bridge.
 
@@ -95,6 +100,7 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 and payload.get(PAYLOAD_SERVICE_KEY) == BRIDGE_SERVICE_NAME
             )
 
+    @trace_call
     async def _async_validate_connection(self, endpoint: str, token: str) -> bool:
         """Validate the native bridge identity before storing an entry."""
         for target in (endpoint, endpoint.replace("_", "-")):
@@ -135,6 +141,7 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 continue
         return False
 
+    @trace_call
     async def async_step_user(self, user_input=None):
         """Offer an endpoint fallback when Supervisor discovery is unavailable."""
         await self.async_set_unique_id(BRIDGE_UNIQUE_ID)
@@ -164,6 +171,7 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
+    @trace_call
     async def async_step_hassio(self, discovery_info):
         """Discover a Bridge add-on through the Supervisor service registry."""
         endpoint = self._endpoint_from_hassio_slug(discovery_info.slug)
@@ -207,6 +215,7 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
         return await self.async_step_hassio_confirm()
 
+    @trace_call
     async def async_step_hassio_confirm(self, user_input=None):
         """Create the discovered add-on entry after one user confirmation."""
         if user_input is None:

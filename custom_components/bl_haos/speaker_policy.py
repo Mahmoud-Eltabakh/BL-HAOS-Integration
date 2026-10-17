@@ -14,12 +14,15 @@ from typing import Any
 
 from .const import PAYLOAD_CONNECTED_KEY, PAYLOAD_DETACHED_KEY, PAYLOAD_PAIRED_KEY
 
+from .call_trace import trace_call
+
 # What to do with the speaker's media player entity.
 ENTITY_ENABLED = "enabled"
 ENTITY_DISABLED = "disabled"
 ENTITY_REMOVED = "removed"
 
 
+@trace_call
 def desired_entity_state(speaker: Mapping[str, Any]) -> str:
     """Return the entity state one published speaker should be in.
 

@@ -59,6 +59,8 @@ from .const import (
 )
 from .speaker_policy import ENTITY_DISABLED, ENTITY_REMOVED, desired_entity_state
 
+from .call_trace import trace_call
+
 _LOGGER = get_logger(__name__)
 
 # Home Assistant content types ("music", "video", "audio/mpeg", "channel") and
@@ -68,6 +70,7 @@ _LOGGER = get_logger(__name__)
 _MEDIA_TYPE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*(?:/[A-Za-z0-9!#$&^_.+-]+)?$")
 
 
+@trace_call
 def _normalize_media_type(media_type: str | None) -> str | None:
     """Return a safe media-type token for the bridge, or None when unusable."""
     if not media_type or not isinstance(media_type, str):
@@ -78,11 +81,13 @@ def _normalize_media_type(media_type: str | None) -> str | None:
     return candidate.lower()
 
 
+@trace_call
 def entity_unique_id(address: str) -> str:
     """Return the entity-registry unique id of one speaker's media player."""
     return f"{DOMAIN}_{address.replace(':', '')}"
 
 
+@trace_call
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -99,10 +104,12 @@ async def async_setup_entry(
         list(client.speakers.keys()),
     )
 
+    @trace_call
     def _registered_entity_id(address: str) -> str | None:
         """Return the entity id Home Assistant registered for one speaker."""
         return registry.async_get_entity_id(MEDIA_PLAYER_DOMAIN, DOMAIN, entity_unique_id(address))
 
+    @trace_call
     def _add_speaker(address: str) -> None:
         """Add, or refresh, the entity of a speaker that belongs in Home Assistant."""
         entity_id = _registered_entity_id(address)
@@ -130,6 +137,7 @@ async def async_setup_entry(
         _LOGGER.debug("Adding new media player entity for speaker %s (%s)", address, entity.name)
         async_add_entities([entity])
 
+    @trace_call
     def _disable_speaker(address: str) -> None:
         """Disable the entity of a speaker that is paired but not connected.
 
@@ -149,6 +157,7 @@ async def async_setup_entry(
         # The state goes with it: a disabled entity must not leave a card behind.
         hass.states.async_remove(entity_id)
 
+    @trace_call
     def _remove_speaker(address: str) -> None:
         """Remove a speaker's entity, its state and its registry entry."""
         entity = speakers.pop(address, None)
@@ -158,6 +167,7 @@ async def async_setup_entry(
         _LOGGER.debug("Removing media player entity %s of speaker %s", entity_id, address)
         hass.async_create_task(_async_remove_entity(entity, entity_id))
 
+    @trace_call
     async def _async_remove_entity(entity: BLHAOSMediaPlayer | None, entity_id: str) -> None:
         """Remove one entity completely.
 
@@ -171,6 +181,7 @@ async def async_setup_entry(
         registry.async_remove(entity_id)
 
     @callback
+    @trace_call
     def async_discover_speaker(address: str) -> None:
         speaker = client.speakers.get(address)
         if speaker is None:
@@ -216,6 +227,7 @@ class BLHAOSMediaPlayer(MediaPlayerEntity):
         | MediaPlayerEntityFeature.BROWSE_MEDIA
     )
 
+    @trace_call
     def __init__(self, client: BLHAOSClient, address: str) -> None:
         """Initialize a native media player for one Bluetooth speaker."""
         self._client = client
@@ -223,19 +235,23 @@ class BLHAOSMediaPlayer(MediaPlayerEntity):
         self._attr_unique_id = entity_unique_id(self._address)
 
     @property
+    @trace_call
     def _speaker(self) -> dict:
         return self._client.get_speaker(self._address) or {}
 
     @property
+    @trace_call
     def _playback(self) -> dict:
         playback = self._speaker.get(PAYLOAD_PLAYBACK_KEY)
         return playback if isinstance(playback, dict) else {}
 
     @property
+    @trace_call
     def name(self) -> str:
         return self._speaker.get(PAYLOAD_NAME_KEY, self._address)
 
     @property
+    @trace_call
     def available(self) -> bool:
         """Bridge reachability *and* the speaker's own availability.
 
@@ -248,6 +264,7 @@ class BLHAOSMediaPlayer(MediaPlayerEntity):
         return self._client.transport_available and bool(self._speaker.get(PAYLOAD_AVAILABLE_KEY, True))
 
     @property
+    @trace_call
     def state(self):
         """Return the state of the device."""
         if not self._speaker.get(PAYLOAD_CONNECTED_KEY):
@@ -257,16 +274,19 @@ class BLHAOSMediaPlayer(MediaPlayerEntity):
         return bridge_state if bridge_state in valid_states else MediaPlayerState.IDLE
 
     @property
+    @trace_call
     def volume_level(self) -> float | None:
         return self._playback.get(PAYLOAD_VOLUME_KEY)
 
     @property
+    @trace_call
     def media_position(self) -> int | None:
         """Elapsed playback time so Home Assistant can draw a progress bar."""
         position = self._playback.get(PAYLOAD_POSITION_KEY)
         return int(position) if isinstance(position, (int, float)) else None
 
     @property
+    @trace_call
     def media_position_updated_at(self) -> datetime | None:
         """Timestamp the reported position belongs to; HA extrapolates from here."""
         updated = self._playback.get(PAYLOAD_POSITION_UPDATED_AT_KEY)
@@ -275,24 +295,28 @@ class BLHAOSMediaPlayer(MediaPlayerEntity):
         return datetime.fromtimestamp(updated, tz=timezone.utc)
 
     @property
+    @trace_call
     def media_duration(self) -> int | None:
         """Total media length in seconds, once the bridge has probed it."""
         duration = self._playback.get(PAYLOAD_DURATION_KEY)
         return int(duration) if isinstance(duration, (int, float)) and duration > 0 else None
 
     @property
+    @trace_call
     def media_title(self) -> str | None:
         """Name of the stream being played, so Home Assistant can label it."""
         title = self._playback.get(PAYLOAD_TITLE_KEY)
         return title if isinstance(title, str) and title.strip() else None
 
     @property
+    @trace_call
     def media_artist(self) -> str | None:
         """Embedded artist tag when the media carries one."""
         artist = self._playback.get(PAYLOAD_ARTIST_KEY)
         return artist if isinstance(artist, str) and artist.strip() else None
 
     @property
+    @trace_call
     def device_info(self) -> DeviceInfo:
         return DeviceInfo(
             identifiers={(DOMAIN, self._address)},
@@ -302,16 +326,19 @@ class BLHAOSMediaPlayer(MediaPlayerEntity):
         )
 
     @property
+    @trace_call
     def extra_state_attributes(self) -> dict[str, str]:
         """Expose the physical Bluetooth address for diagnostics."""
         return {"bluetooth_address": self._address, PAYLOAD_ADAPTER_KEY: self._speaker.get(PAYLOAD_ADAPTER_KEY, "")}
 
+    @trace_call
     async def async_added_to_hass(self) -> None:
         """Push cached state changes without entity network I/O."""
         await super().async_added_to_hass()
         self.async_on_remove(self._client.async_add_listener(self._async_speaker_updated))
 
     @callback
+    @trace_call
     def _async_speaker_updated(self, address: str) -> None:
         if address == self._address:
             _LOGGER.debug(
@@ -324,6 +351,7 @@ class BLHAOSMediaPlayer(MediaPlayerEntity):
             )
             self.async_write_ha_state()
 
+    @trace_call
     async def _async_command(self, operation: str, **kwargs) -> None:
         _LOGGER.debug("Entity %s executing command: %s (kwargs: %s)", self.entity_id, operation, kwargs)
         try:
@@ -353,18 +381,23 @@ class BLHAOSMediaPlayer(MediaPlayerEntity):
             _LOGGER.debug("Entity %s command %s timed out", self.entity_id, operation)
             raise HomeAssistantError(f"Timeout communicating with speaker during {operation}") from error
 
+    @trace_call
     async def async_media_play(self) -> None:
         await self._async_command(COMMAND_PLAY)
 
+    @trace_call
     async def async_media_pause(self) -> None:
         await self._async_command(COMMAND_PAUSE)
 
+    @trace_call
     async def async_media_stop(self) -> None:
         await self._async_command(COMMAND_STOP)
 
+    @trace_call
     async def async_set_volume_level(self, volume: float) -> None:
         await self._async_command(COMMAND_SET_VOLUME, volume=volume)
 
+    @trace_call
     async def async_play_media(self, media_type: str, media_id: str, **kwargs) -> None:
         """Resolve Home Assistant sources to an add-on-reachable media URL."""
         if kwargs.get("enqueue"):
@@ -393,6 +426,7 @@ class BLHAOSMediaPlayer(MediaPlayerEntity):
         )
         await self._async_command(COMMAND_PLAY_MEDIA, url=url, media_type=media_type)
 
+    @trace_call
     async def async_browse_media(
         self, media_content_type: str | None = None, media_content_id: str | None = None
     ) -> BrowseMedia:

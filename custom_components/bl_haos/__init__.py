@@ -13,6 +13,8 @@ import logging
 from .client import BLHAOSClient
 from .const import CONF_ENDPOINT, CONF_LOG_LEVEL, CONF_TOKEN, DOMAIN, INTEGRATION_LOGGER, PLATFORMS, get_logger, normalize_log_level
 
+from .call_trace import trace_call
+
 _LOGGER = get_logger(__name__)
 
 
@@ -23,6 +25,7 @@ class BLHAOSRuntime:
     client: BLHAOSClient
 
 
+@trace_call
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up BL-HAOS from a config entry."""
     effective_log_level = normalize_log_level(entry.data.get(CONF_LOG_LEVEL))
@@ -55,6 +58,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
+@trace_call
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a BL-HAOS config entry."""
     _LOGGER.debug("Unloading BL-HAOS config entry %s", entry.entry_id)

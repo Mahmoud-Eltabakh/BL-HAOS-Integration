@@ -4,6 +4,8 @@ import logging
 from collections.abc import MutableMapping
 from typing import Any
 
+from .call_trace import trace_call
+
 DOMAIN = "bl_haos"
 CONF_ENDPOINT = "endpoint"
 CONF_TOKEN = "token"
@@ -135,6 +137,7 @@ def get_logger(name: str) -> BLHAOSLoggerAdapter:
 	return BLHAOSLoggerAdapter(logging.getLogger(name), {})
 
 
+@trace_call
 def normalize_log_level(value: str | None) -> str:
 	"""Map the add-on log-level vocabulary to Python logging levels."""
 	normalized = str(value or "info").strip().lower()

@@ -47,6 +47,29 @@ That is expected, so an outage is reported **once**:
 
 If disconnects look more frequent than your add-on restarts, download the config-entry diagnostics: the `stream` block reports `outages` (one per lost stream), `failed_attempts` (the retries inside them), `reconnects`, `consecutive_failures`, `last_reason`, `last_disconnect_at`, `last_recovery_at`, and `last_outage_seconds`. Reasons are categories (`stream-closed`, `bridge-unreachable`, `stream-timeout`, `credential-rejected`), never raw connection errors. `credential-rejected` is the one case the integration stops retrying — reload the entry after the add-on has issued a new token.
 
+### Detailed call tracing
+
+From integration 0.2.19, DEBUG logging traces named integration functions,
+including setup, discovery/configuration, native HTTP/WebSocket calls, speaker
+policy, diagnostics, entity properties, and media-player commands. Logger
+construction and message formatting are excluded to avoid recursive logging.
+Enable the discovered add-on's `log_level: debug` (its `trace` option also maps
+to DEBUG), or temporarily set the `custom_components.bl_haos` logger to `debug`
+for a manually configured entry.
+
+`[BL-HAOS] call enter` records the function, a `span` identifier, and its
+`parent` span. `call exit`, `call error`, and `call cancel` record elapsed
+milliseconds; errors name their exception type without exposing its message
+or traceback. Arguments and return values are never included in call traces.
+Spans are local to one runtime, not a cross-process request ID, and third-party
+library internals are not traced. Async execution is traced when awaited,
+and long-running listeners complete their span only when they stop.
+
+Export Home Assistant Core logs alongside the add-on logs to correlate command
+times with BlueZ/audio behavior. Restore `info` after reproducing the issue:
+DEBUG traces can be large and add overhead. Existing operational messages
+may still contain identifiers or media URLs, so redact logs before sharing.
+
 ## HACS Publishing
 
 This repository is HACS-compatible as a custom integration repository. Listing it in HACS's default repository catalog is a separate HACS submission process; until then, users add the repository URL manually in HACS.

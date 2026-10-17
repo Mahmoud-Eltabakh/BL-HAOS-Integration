@@ -56,6 +56,8 @@ from .const import (
     WEBSOCKET_NATIVE_PATH,
 )
 
+from .call_trace import trace_call
+
 _MAC_ADDRESS = re.compile(r"^[0-9a-f]{2}(?::[0-9a-f]{2}){5}$")
 _COMMAND_TIMEOUT = aiohttp.ClientTimeout(total=COMMAND_TIMEOUT_SECONDS)
 _IDENTITY_TIMEOUT = aiohttp.ClientTimeout(total=IDENTITY_TIMEOUT_SECONDS)
@@ -69,11 +71,13 @@ STREAM_RECONNECT_MAX_DELAY = STREAM_RECONNECT_MAX_DELAY_SECONDS
 
 
 
+@trace_call
 def _redacted_address(address: str) -> str:
     """Keep logs useful without recording a complete Bluetooth address."""
     return f"...:{address[-5:]}"
 
 
+@trace_call
 def normalize_address(address: str) -> str | None:
     """Return a canonical Bluetooth MAC address or reject the value."""
     normalized = address.strip().lower().replace("-", ":")
@@ -83,6 +87,7 @@ def normalize_address(address: str) -> str | None:
 class BLHAOSClient:
     """Maintain the cached state of trusted BL-HAOS speakers."""
 
+    @trace_call
     def __init__(self, hass: HomeAssistant, endpoint: str, token: str) -> None:
         self.hass = hass
         self.endpoint = endpoint.rstrip("/")
@@ -107,10 +112,12 @@ class BLHAOSClient:
         self._outage_started: float | None = None
 
     @property
+    @trace_call
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"{BEARER_PREFIX}{self.token}"}
 
     @staticmethod
+    @trace_call
     def _response_error(status: int, body: Any, fallback: str) -> aiohttp.ClientError:
         """Build a transport error from an HTTP response without assuming a dict body.
 
@@ -125,6 +132,7 @@ class BLHAOSClient:
             return aiohttp.ClientError(detail if isinstance(detail, str) else fallback)
         return aiohttp.ClientError(fallback)
 
+    @trace_call
     async def async_initialize(self) -> None:
         """Validate identity, cache the snapshot, and start event updates."""
         _LOGGER.debug("Initializing BL-HAOS client at %s", self.endpoint)
@@ -150,6 +158,7 @@ class BLHAOSClient:
             else:
                 self._websocket_task = self.hass.async_create_task(self._async_listen())
 
+    @trace_call
     async def _async_require_bridge_identity(self, session: aiohttp.ClientSession) -> None:
         """Confirm the endpoint is a BL-HAOS bridge before the token is presented.
 
@@ -171,6 +180,7 @@ class BLHAOSClient:
                 )
         _LOGGER.debug("Endpoint %s identified as %s before credentials", self.endpoint, BRIDGE_SERVICE_NAME)
 
+    @trace_call
     async def _async_refresh_snapshot(self, session: aiohttp.ClientSession) -> None:
         _LOGGER.debug("Refreshing speakers snapshot from %s%s", self.endpoint, NATIVE_API_PATH)
         async with session.get(f"{self.endpoint}{NATIVE_API_PATH}/speakers", headers=self._headers) as response:
@@ -196,6 +206,7 @@ class BLHAOSClient:
             list(self.speakers.keys()),
         )
 
+    @trace_call
     async def async_command(self, address: str, operation: str, **options: Any) -> dict[str, Any]:
         """Submit a native command and cache its authoritative acknowledgement.
 
@@ -234,6 +245,7 @@ class BLHAOSClient:
                 await asyncio.sleep(COMMAND_RETRY_DELAY_SECONDS)
         raise aiohttp.ClientError(f"{CONNECTION_DROPPED_MARKER} ({COMMAND_ATTEMPTS} attempt(s))")
 
+    @trace_call
     async def _async_send_command(
         self,
         normalized: str,
@@ -271,19 +283,23 @@ class BLHAOSClient:
             raise aiohttp.ClientError("Speaker is no longer a trusted audio sink")
         return self.speakers[normalized]
 
+    @trace_call
     def async_add_listener(self, listener: Callable[[str], None]) -> Callable[[], None]:
         """Register a cache callback and return its unsubscribe function."""
         self._update_listeners.add(listener)
 
+        @trace_call
         def _remove() -> None:
             self._update_listeners.discard(listener)
 
         return _remove
 
+    @trace_call
     def get_speaker(self, address: str) -> dict[str, Any] | None:
         """Read cached speaker data without network I/O."""
         return self.speakers.get(address)
 
+    @trace_call
     def _async_process_speaker(self, speaker: Any) -> str | None:
         if not isinstance(speaker, dict):
             return None
@@ -310,10 +326,12 @@ class BLHAOSClient:
         return address
 
     @staticmethod
+    @trace_call
     def _utc_now() -> str:
         return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
     @staticmethod
+    @trace_call
     def _describe_stream_failure(failure: BaseException | None) -> tuple[str, str]:
         """Return ``(category, human detail)`` for a dropped event stream.
 
@@ -336,6 +354,7 @@ class BLHAOSClient:
             return type(failure).__name__, f"the event stream failed ({type(failure).__name__})"
         return type(failure).__name__, f"the event stream sent an unexpected payload ({failure})"
 
+    @trace_call
     def _async_stream_connected(self) -> None:
         """Record a healthy stream and report the end of an outage."""
         attempts = self.consecutive_failures
@@ -357,6 +376,7 @@ class BLHAOSClient:
         _LOGGER.debug("Native WebSocket event stream connected successfully")
         self._set_transport_available(True)
 
+    @trace_call
     def _async_stream_disconnected(self, failure: BaseException | None) -> None:
         """Record one stream failure, reporting an outage once instead of per retry."""
         category, detail = self._describe_stream_failure(failure)
@@ -392,6 +412,7 @@ class BLHAOSClient:
                 detail,
             )
 
+    @trace_call
     async def _async_listen(self) -> None:
         """Reconnect to the native event stream until the entry is unloaded."""
         parsed = urlsplit(self.endpoint)
@@ -431,6 +452,7 @@ class BLHAOSClient:
             await asyncio.sleep(delay)
             delay = min(delay * 2, STREAM_RECONNECT_MAX_DELAY)
 
+    @trace_call
     def _async_evict_if_rejected(self, speaker: Any, processed_address: str | None) -> None:
         """Drop a cached speaker when a live event rejects its record.
 
@@ -447,6 +469,7 @@ class BLHAOSClient:
         for listener in tuple(self._update_listeners):
             listener(address)
 
+    @trace_call
     def _set_transport_available(self, available: bool) -> None:
         if self.transport_available == available:
             return
@@ -456,6 +479,7 @@ class BLHAOSClient:
             for address in self.speakers:
                 listener(address)
 
+    @trace_call
     async def async_close(self) -> None:
         """Stop the event listener and discard entry-local callbacks."""
         _LOGGER.debug("Closing BL-HAOS client for %s", self.endpoint)
