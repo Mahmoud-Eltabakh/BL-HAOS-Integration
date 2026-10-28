@@ -21,6 +21,9 @@ if str(_STUBS_DIR) not in sys.path:
     sys.path.insert(0, str(_STUBS_DIR))
 
 from custom_components.bl_haos.config_flow import BLHAOSConfigFlow  # noqa: E402
+from custom_components.bl_haos.compatibility import CompatibilityResult  # noqa: E402
+from unittest.mock import AsyncMock, Mock  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
 from custom_components.bl_haos.const import (  # noqa: E402
     ADDON_SLUG,
     DEFAULT_PORT,
@@ -62,3 +65,39 @@ def test_validate_endpoint_normalizes_or_rejects(raw_endpoint, expected):
 )
 def test_endpoint_from_hassio_slug_only_matches_this_addon(slug, expected):
     assert BLHAOSConfigFlow._endpoint_from_hassio_slug(slug) == expected
+
+
+async def test_manual_flow_surfaces_a_specific_incompatibility_error():
+    flow = BLHAOSConfigFlow()
+    flow.hass = SimpleNamespace()
+    flow.async_set_unique_id = AsyncMock()
+    flow._abort_if_unique_id_configured = Mock()
+    flow.async_show_form = Mock(return_value={"type": "form"})
+    flow._async_validate_connection = AsyncMock(return_value=CompatibilityResult(
+        status="incompatible", reason="addon_too_old", addon_version="0.2.69",
+        integration_version="0.2.22", min_integration_version="0.2.22",
+        min_addon_version="0.2.70", protocol_version=1,
+    ))
+
+    result = await flow.async_step_user({"endpoint": HOSTNAME, "token": "secret"})
+
+    assert result["type"] == "form"
+    assert flow.async_show_form.call_args.kwargs["errors"]["base"] == "incompatible_version"
+    flow.async_create_entry = Mock(side_effect=AssertionError("incompatible peers must not create entries"))
+
+
+async def test_discovery_confirmation_aborts_on_known_incompatibility():
+    flow = BLHAOSConfigFlow()
+    flow._discovered_endpoint = f"{HTTP_SCHEME_PREFIX}bl-haos:{DEFAULT_PORT}"
+    flow._discovered_log_level = "info"
+    flow.async_abort = Mock(return_value={"type": "abort"})
+    flow._async_validate_connection = AsyncMock(return_value=CompatibilityResult(
+        status="incompatible", reason="integration_too_old", addon_version="0.2.71",
+        integration_version="0.2.21", min_integration_version="0.2.22",
+        min_addon_version="0.2.70", protocol_version=1,
+    ))
+
+    result = await flow.async_step_hassio_confirm({"token": "secret"})
+
+    assert result == {"type": "abort"}
+    flow.async_abort.assert_called_once_with(reason="incompatible_version")

@@ -19,7 +19,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from custom_components.bl_haos.client import BLHAOSClient  # noqa: E402
+from custom_components.bl_haos.client import BLHAOSClient, IncompatibleBridgeError  # noqa: E402
+from custom_components.bl_haos.compatibility import evaluate_identity  # noqa: E402
+import custom_components.bl_haos.client as client_module  # noqa: E402
 from tests.conftest import FakeSession, load_snapshot  # noqa: E402
 
 ENDPOINT = "http://bl-haos:8099"
@@ -74,3 +76,39 @@ async def test_initialize_checks_identity_before_sending_credentials():
     assert "headers" not in session.get_calls[0][1]
     assert session.get_calls[1][1]["headers"]["Authorization"] == f"Bearer {TOKEN}"
     assert client.transport_available is True
+
+
+async def test_known_mismatch_stops_before_snapshot_and_websocket(monkeypatch):
+    session = FakeSession(load_snapshot("speakers_initial.json"))
+    session.identity.update({"addon_version": "0.2.69", "min_integration_version": "0.2.22"})
+    client = _client(session)
+    result = evaluate_identity(session.identity, "0.2.22")
+
+    async def evaluate(_hass, _identity):
+        return result
+
+    monkeypatch.setattr(client_module, "evaluate_bridge_identity", evaluate)
+    with pytest.raises(IncompatibleBridgeError, match="compatibility check failed"):
+        await client.async_initialize()
+
+    assert [url for url, _ in session.get_calls] == [
+        f"{ENDPOINT}/api/health", f"{ENDPOINT}/api/native/identity",
+    ]
+    assert client.compatibility["status"] == "incompatible"
+    assert session.last_ws_url is None
+    assert session.commands == []
+
+
+async def test_known_mismatch_blocks_command_and_management_requests():
+    session = FakeSession(load_snapshot("speakers_initial.json"))
+    client = _client(session)
+    client.compatibility = evaluate_identity(
+        {"bridge_id": "bl_haos_native_bridge", "version": 2}, "0.2.22"
+    ).as_dict()
+
+    with pytest.raises(IncompatibleBridgeError):
+        await client.async_command("10:22:33:44:55:66", "stop")
+    with pytest.raises(IncompatibleBridgeError):
+        await client.async_scan(True)
+    assert session.commands == []
+    assert session.management_calls == []

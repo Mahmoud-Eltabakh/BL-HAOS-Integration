@@ -22,8 +22,7 @@ substitution. Queue start, Next, and Previous are not automatically retried.
 The production panel and integrated bridge 0.2.69 remain undeployed; local
 Core 2026.10.3 tests are not live-provider, expiry or physical-playback proof.
 After separately authorized installation, use **Native Browse Media** on the
-speaker or **Open Media Catalog** beside Home Assistant Native integration in
-Ingress. In **Play on**, select exactly one connected BL-HAOS speaker, browse
+speaker or **Open Media Catalog** in the Home Assistant-native media panel. In **Play on**, select exactly one connected BL-HAOS speaker, browse
 the provider hierarchy and press **Play** for an audio item or provider playlist.
 The original opaque reference goes unchanged to native `media_player.play_media`;
 HA owns provider authentication and reference resolution. A playlist stays one
@@ -49,8 +48,7 @@ IDs.
 
 The local Phase 26 candidate resolves every saved reference in Home Assistant
 before one queue start. The bridge owns one in-memory queue per speaker; the
-Library panel, Ingress SpeakerCard, and native entity consume the bridge's
-authoritative snapshot. Native queue controls require bridge queue version 1.
+Library panel and native entity consume the bridge's authoritative snapshot. Native queue controls require bridge queue version 1.
 Resolved playback URLs are transient between Home Assistant and the bridge and
 are never sent to the browser or stored in the playlist library. Failed items
 remain current until an explicit Play retry or Next skip; the integration does
@@ -81,9 +79,9 @@ An indeterminate static-registration failure stays fail-closed for the current
 Core lifetime rather than attempting duplicate registration; setup then reports
 that a Core restart is required. No restart is performed automatically.
 
-The separate `panel_ui` source package builds the fixed module using `npm ci`
+The separate `panel_ui` source package builds the native Home Assistant panel using `npm ci`
 and `npm run build` from that directory. Its lockfile and exact dependency pins
-are independent of the add-on web UI. The local catalog is covered by Core
+are independent of the headless add-on. The local catalog is covered by Core
 2026.10.3 SIL and injected-hass browser tests; production provider playback and
 HA-shell acceptance still require the phase 24 target-host checks.
 
@@ -95,6 +93,35 @@ HA-shell acceptance still require the phase 24 target-host checks.
 
 The integration derives the add-on's private hostname from Supervisor discovery, validates `GET /api/native/identity`, then reads `GET /api/native/speakers` and listens on `/ws/native` for updates. The Bridge add-on pushes its native token and configured `log_level` through the same Supervisor discovery message, so discovered integration logging stays synchronized with the add-on without changing Home Assistant's global logger. Existing entries refresh these values and reload themselves when the add-on rotates its token or changes log level. A manual local endpoint and token entry are available only as a fallback; manually configured entries default to `info`.
 
+
+## Headless bridge migration and compatibility
+
+Bridge 0.2.71 and integration 0.2.22 are local, undeployed candidates. The old
+add-on Ingress application and legacy management routes are retired; the native
+Home Assistant media and Speakers panels remain. Pairing, speaker settings, and
+adapter actions are available from the **Speakers** view, admin-only `bl_haos.*`
+services, and speaker options flow. The add-on health/watchdog/discovery endpoints
+remain internal on port 8099 without host-port mapping; `/ws` remains operational
+transport, not an alternative UI.
+
+The integration requires add-on 0.2.70 or newer; add-on 0.2.69 and integration 0.2.21 are known too old for this candidate. Bridge identity advertises
+`addon_version` and `min_integration_version`; these product versions do not change
+integer native protocol `version: 1`. The supported local pair is bridge 0.2.71
+with integration 0.2.22. Lower versions than a declared minimum, partial or malformed
+metadata, prereleases, and unsupported protocol versions produce an HA Repair
+error shown in Home Assistant Repairs. If both product metadata fields are absent on protocol 1, Home Assistant Repairs shows an
+`unknown_legacy` warning while allowing existing behavior. An older integration
+cannot enforce minimum versions advertised by a newer bridge. Update the integration
+first, confirm native controls with the existing bridge (legacy warning may be
+expected), then update the bridge and verify identity/repair clearance. Back up
+configuration and data first; preserve existing tokens, speaker pairings, aliases,
+and settings. For rollback, restore a previously working package pair and backup
+under separate maintenance authority. Do not delete speakers, wipe the config
+entry, or rotate credentials to fix a compatibility mismatch. In-memory playback
+queues still do not resume after an add-on restart. Old Ingress links may stop
+resolving; a root notice cannot restore Supervisor Ingress access. A grace release
+with a reachable UI requires separate approval. Phase 39 remains the authority
+boundary for installation, publication, deployment, and live acceptance.
 
 ## Pairing, Speaker Management, and Settings
 
@@ -132,8 +159,8 @@ acceptance or deployment evidence.
 A trusted speaker that is switched off (or out of range) keeps its identity but
 is **disabled**: the add-on keeps publishing it with `connected: false` and
 `paired: true`, the entity leaves the state machine (no dead card, and no
-automation target that silently fails) while its name, history and dashboard
-identity are kept, and the same entity is enabled again by itself when the
+automation target that silently fails) while its name, history and Home Assistant
+entity identity are kept, and the same entity is enabled again by itself when the
 speaker comes back.
 
 A speaker that is no longer paired has its entity **removed completely**: BlueZ
@@ -148,7 +175,7 @@ entities it knows nothing about.
 
 ## Security
 
-The Bridge does not map its native API onto the host LAN. Ingress remains the browser-facing path, while the integration communicates over Home Assistant's private add-on network.
+The Bridge does not map its native API onto the host LAN. The native integration communicates with it over Home Assistant's private add-on network; the retired add-on Ingress UI is not a browser-facing path.
 
 ## Add-on restarts and log noise
 

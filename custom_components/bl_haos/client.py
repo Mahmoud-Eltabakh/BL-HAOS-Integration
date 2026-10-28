@@ -58,6 +58,11 @@ from .const import (
 )
 
 from .call_trace import trace_call
+from .compatibility import (
+    CompatibilityResult,
+    async_update_compatibility_issue,
+    evaluate_bridge_identity,
+)
 
 _MAC_ADDRESS = re.compile(r"^[0-9a-f]{2}(?::[0-9a-f]{2}){5}$")
 _COMMAND_TIMEOUT = aiohttp.ClientTimeout(total=COMMAND_TIMEOUT_SECONDS)
@@ -118,14 +123,25 @@ def normalize_address(address: str) -> str | None:
     return normalized if _MAC_ADDRESS.fullmatch(normalized) else None
 
 
+class IncompatibleBridgeError(aiohttp.ClientError):
+    """The authenticated peer does not satisfy this integration's release policy."""
+
+    @trace_call
+    def __init__(self, result: CompatibilityResult) -> None:
+        self.result = result
+        super().__init__(f"BL-HAOS compatibility check failed ({result.reason})")
+
+
 class BLHAOSClient:
     """Maintain the cached state of trusted BL-HAOS speakers."""
 
     @trace_call
-    def __init__(self, hass: HomeAssistant, endpoint: str, token: str) -> None:
+    def __init__(self, hass: HomeAssistant, endpoint: str, token: str, entry_id: str | None = None) -> None:
         self.hass = hass
         self.endpoint = endpoint.rstrip("/")
         self.token = token
+        self.entry_id = entry_id
+        self.compatibility: dict[str, Any] | None = None
         self.speakers: dict[str, dict[str, Any]] = {}
         self._update_listeners: set[Callable[[str], None]] = set()
         self._websocket_task: asyncio.Task[None] | None = None
@@ -168,17 +184,10 @@ class BLHAOSClient:
 
     @trace_call
     async def async_initialize(self) -> None:
-        """Validate identity, cache the snapshot, and start event updates."""
+        """Validate service and release compatibility before snapshot or stream."""
         _LOGGER.debug("Initializing BL-HAOS client at %s", self.endpoint)
         session = async_get_clientsession(self.hass)
-        await self._async_require_bridge_identity(session)
-        async with session.get(f"{self.endpoint}{NATIVE_API_PATH}/identity", headers=self._headers) as response:
-            identity = await response.json(content_type=None)
-            if response.status != HTTPStatus.OK or not isinstance(identity, dict) or identity.get(PAYLOAD_BRIDGE_ID_KEY) != BRIDGE_ID:
-                raise self._response_error(
-                    response.status, identity, "Unexpected BL-HAOS native bridge identity"
-                )
-        _LOGGER.debug("BL-HAOS native bridge identity verified: %s", identity)
+        await self._async_check_bridge_compatibility(session)
         await self._async_refresh_snapshot(session)
         self.transport_available = True
         _LOGGER.debug(
@@ -191,6 +200,45 @@ class BLHAOSClient:
                 self._websocket_task = create_background_task(self._async_listen(), name="bl_haos_websocket")
             else:
                 self._websocket_task = self.hass.async_create_task(self._async_listen())
+
+    @trace_call
+    async def _async_check_bridge_compatibility(self, session: aiohttp.ClientSession) -> CompatibilityResult:
+        """Re-authenticate identity and apply the shared policy before any data/commands."""
+        await self._async_require_bridge_identity(session)
+        async with session.get(
+            f"{self.endpoint}{NATIVE_API_PATH}/identity",
+            headers=self._headers,
+            timeout=_IDENTITY_TIMEOUT,
+        ) as response:
+            identity = await response.json(content_type=None)
+            if response.status != HTTPStatus.OK or not isinstance(identity, dict) or identity.get(PAYLOAD_BRIDGE_ID_KEY) != BRIDGE_ID:
+                raise self._response_error(
+                    response.status, identity, "Unexpected BL-HAOS native bridge identity"
+                )
+        result = await evaluate_bridge_identity(self.hass, identity)
+        self.compatibility = result.as_dict()
+        if self.entry_id:
+            await async_update_compatibility_issue(self.hass, self.entry_id, result)
+        _LOGGER.debug(
+            "BL-HAOS compatibility status=%s reason=%s addon_version=%s integration_version=%s",
+            result.status,
+            result.reason,
+            result.addon_version or "unknown",
+            result.integration_version or "unknown",
+        )
+        if result.status == "incompatible":
+            self.auth_failed = False
+            self._set_transport_available(False)
+            raise IncompatibleBridgeError(result)
+        return result
+
+    @trace_call
+    def _ensure_compatible(self) -> None:
+        result = self.compatibility
+        if result is not None and result.get("status") == "incompatible":
+            raise IncompatibleBridgeError(
+                CompatibilityResult(**result)
+            )
 
     @trace_call
     async def _async_require_bridge_identity(self, session: aiohttp.ClientSession) -> None:
@@ -248,6 +296,7 @@ class BLHAOSClient:
         playback replacements and queue navigation only once: a lost
         acknowledgement does not mean the operation was rejected.
         """
+        self._ensure_compatible()
         normalized = normalize_address(address)
         if normalized is None:
             raise aiohttp.ClientError("Invalid Bluetooth address")
@@ -322,6 +371,7 @@ class BLHAOSClient:
     async def _async_management_request(
         self, method: str, resource: str, payload: dict[str, Any] | None = None
     ) -> Any:
+        self._ensure_compatible()
         session = async_get_clientsession(self.hass)
         request = getattr(session, method.lower())
         kwargs: dict[str, Any] = {"headers": self._headers, "timeout": _COMMAND_TIMEOUT}
@@ -567,6 +617,7 @@ class BLHAOSClient:
         while not self._closed:
             failure: BaseException | None = None
             try:
+                await self._async_check_bridge_compatibility(session)
                 _LOGGER.debug("Connecting to native WebSocket event stream at %s", websocket_url)
                 async with session.ws_connect(websocket_url, headers=self._headers, heartbeat=WEBSOCKET_HEARTBEAT_SECONDS) as websocket:
                     delay = STREAM_RECONNECT_BASE_DELAY

@@ -46,6 +46,13 @@ async def async_get_config_entry_diagnostics(
         "contract_version": DIAGNOSTICS_CONTRACT_VERSION,
         "health_status": HEALTH_STATUS_HEALTHY if client.transport_available else HEALTH_STATUS_UNAVAILABLE,
         "auth_failed": client.auth_failed,
+        "compatibility": {
+            key: (client.compatibility or {}).get(key)
+            for key in (
+                "status", "reason", "protocol_version", "addon_version",
+                "integration_version", "min_integration_version", "min_addon_version",
+            )
+        },
         "entry": {
             "entry_id": entry.entry_id,
             "endpoint_configured": bool(entry.data.get(CONF_ENDPOINT)),

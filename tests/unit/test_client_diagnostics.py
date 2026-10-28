@@ -44,6 +44,13 @@ async def test_diagnostics_reports_stream_outage_history():
         TOKEN,
     )
     await client._async_refresh_snapshot(session)
+    client.compatibility = {
+        "status": "unknown_legacy", "reason": "legacy_metadata_missing",
+        "protocol_version": 1, "addon_version": None,
+        "integration_version": "0.2.21", "min_integration_version": None,
+        "min_addon_version": "0.2.70", "credential_fingerprint": "secret-fingerprint",
+        "token": "secret-token", "endpoint": "https://secret.invalid/",
+    }
     # An add-on restart, as the listener records it.
     client._async_stream_connected()
     client._async_stream_disconnected(None)
@@ -58,7 +65,16 @@ async def test_diagnostics_reports_stream_outage_history():
     assert stream["last_disconnect_at"] is not None
     assert stream["credential_rejected"] is False
     assert payload["health_status"] == "unavailable"
+    assert payload["compatibility"] == {
+        "status": "unknown_legacy", "reason": "legacy_metadata_missing",
+        "protocol_version": 1, "addon_version": None,
+        "integration_version": "0.2.21", "min_integration_version": None,
+        "min_addon_version": "0.2.70",
+    }
 
     # Reason categories never embed the endpoint, and secrets stay redacted.
     assert ENDPOINT not in str(payload)
     assert TOKEN not in str(payload)
+    assert "secret-fingerprint" not in str(payload)
+    assert "secret-token" not in str(payload)
+    assert "secret.invalid" not in str(payload)

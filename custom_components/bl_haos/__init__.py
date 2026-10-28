@@ -16,7 +16,8 @@ from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import entity_registry as er
 import logging
 
-from .client import BLHAOSClient
+from .client import BLHAOSClient, IncompatibleBridgeError
+from .compatibility import issue_id
 from .const import CONF_ENDPOINT, CONF_LOG_LEVEL, CONF_TOKEN, DOMAIN, INTEGRATION_LOGGER, PLATFORMS, get_logger, normalize_log_level
 
 from .call_trace import trace_call
@@ -162,7 +163,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry.data.get(CONF_ENDPOINT),
         effective_log_level,
     )
-    client = BLHAOSClient(hass, entry.data[CONF_ENDPOINT], entry.data[CONF_TOKEN])
+    client = BLHAOSClient(hass, entry.data[CONF_ENDPOINT], entry.data[CONF_TOKEN], entry.entry_id)
     try:
         await client.async_initialize()
         _LOGGER.debug(
@@ -173,6 +174,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     except asyncio.CancelledError:
         await _finish_operation(client.async_close())
         raise
+    except IncompatibleBridgeError as error:
+        await client.async_close()
+        raise ConfigEntryNotReady("BL-HAOS add-on and integration versions are incompatible; see Repairs") from error
     except Exception as error:
         _LOGGER.debug("Failed to initialize BL-HAOS client for entry %s: %s", entry.entry_id, error)
         await client.async_close()
@@ -226,3 +230,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     else:
         _LOGGER.debug("BL-HAOS config entry %s unload returned False", entry.entry_id)
     return unloaded
+
+
+@trace_call
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Clear the persistent compatibility repair only when the entry is removed."""
+    from homeassistant.helpers import issue_registry as ir
+
+    ir.async_delete_issue(hass, DOMAIN, issue_id(entry.entry_id))

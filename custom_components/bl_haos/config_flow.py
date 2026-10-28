@@ -11,6 +11,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .client import BLHAOSClient
+from .compatibility import CompatibilityResult, evaluate_bridge_identity
 from .const import (
     ADDON_HOSTNAME_SLUG,
     ADDON_SLUG,
@@ -170,8 +171,8 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
 
     @trace_call
-    async def _async_validate_connection(self, endpoint: str, token: str) -> bool:
-        """Validate the native bridge identity before storing an entry."""
+    async def _async_validate_connection(self, endpoint: str, token: str) -> CompatibilityResult | None:
+        """Validate identity and release compatibility before storing an entry."""
         for target in (endpoint, endpoint.replace("_", "-")):
             try:
                 _LOGGER.debug("Validating bridge connection to endpoint: %s", target)
@@ -192,23 +193,21 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         and isinstance(payload, dict)
                         and payload.get(PAYLOAD_BRIDGE_ID_KEY) == BRIDGE_ID
                     ):
+                        result = await evaluate_bridge_identity(self.hass, payload)
                         _LOGGER.debug(
-                            "Bridge identity verified at %s (bridge_id=%s, version=%s)",
+                            "Bridge compatibility at %s: status=%s reason=%s",
                             target,
-                            payload.get("bridge_id"),
-                            payload.get("version"),
+                            result.status,
+                            result.reason,
                         )
-                        return True
+                        return result
                     _LOGGER.debug(
-                        "Bridge connection to %s returned unexpected response (status=%s, payload=%s)",
-                        target,
-                        response.status,
-                        payload,
+                        "Bridge identity validation failed at %s (HTTP %s)", target, response.status
                     )
             except (AttributeError, TypeError, ValueError, aiohttp.ClientError, TimeoutError) as err:
                 _LOGGER.debug("Bridge validation attempt failed for %s: %s", target, err)
                 continue
-        return False
+        return None
 
     @trace_call
     async def async_step_user(self, user_input=None):
@@ -221,16 +220,24 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             token = str(user_input.get(CONF_TOKEN, "")).strip()
             endpoint = self._validate_endpoint(raw_endpoint)
             _LOGGER.debug("User submitted endpoint '%s' (normalized: '%s')", raw_endpoint, endpoint)
+            compatibility = None
             if endpoint is not None and token:
                 for candidate in (endpoint, endpoint.replace("_", "-")):
-                    if await self._async_validate_connection(candidate, token):
+                    compatibility = await self._async_validate_connection(candidate, token)
+                    if compatibility is not None and compatibility.status == "incompatible":
+                        break
+                    if compatibility is not None:
                         _LOGGER.debug("Config flow user step creating entry for endpoint: %s", candidate)
                         return self.async_create_entry(
                             title=ENTRY_TITLE,
                             data={CONF_ENDPOINT: candidate, CONF_TOKEN: token},
                         )
             _LOGGER.debug("User configuration failed connection validation for %s", raw_endpoint)
-            errors["base"] = "cannot_connect"
+            errors["base"] = (
+                "incompatible_version"
+                if compatibility is not None and compatibility.status == "incompatible"
+                else "cannot_connect"
+            )
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema({
@@ -252,9 +259,14 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._discovered_token = str((discovery_info.config or {}).get("token", "")).strip()
         self._discovered_log_level = normalize_log_level((discovery_info.config or {}).get(CONF_LOG_LEVEL))
         self.context["title_placeholders"] = {"name": discovery_info.name}
-        connection_valid = bool(self._discovered_token) and await self._async_validate_connection(
-            endpoint, self._discovered_token
+        compatibility = (
+            await self._async_validate_connection(endpoint, self._discovered_token)
+            if self._discovered_token
+            else None
         )
+        if compatibility is not None and compatibility.status == "incompatible":
+            return self.async_abort(reason="incompatible_version")
+        connection_valid = compatibility is not None
         _LOGGER.debug("Hass.io discovery validation result: connection_valid=%s", connection_valid)
         updates = {CONF_ENDPOINT: endpoint, CONF_LOG_LEVEL: self._discovered_log_level}
         if connection_valid:
@@ -293,9 +305,12 @@ class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 data_schema=vol.Schema({vol.Required(CONF_TOKEN): str}),
             )
         _LOGGER.debug("Validating user-supplied token for Hass.io endpoint: %s", self._discovered_endpoint)
-        if not await self._async_validate_connection(self._discovered_endpoint, user_input[CONF_TOKEN]):
+        compatibility = await self._async_validate_connection(self._discovered_endpoint, user_input[CONF_TOKEN])
+        if compatibility is None:
             _LOGGER.debug("Hass.io confirm validation failed for endpoint %s", self._discovered_endpoint)
             return self.async_abort(reason="cannot_connect")
+        if compatibility.status == "incompatible":
+            return self.async_abort(reason="incompatible_version")
         _LOGGER.debug("Hass.io confirm succeeded, creating config entry for %s", self._discovered_endpoint)
         return self.async_create_entry(
             title=ENTRY_TITLE,

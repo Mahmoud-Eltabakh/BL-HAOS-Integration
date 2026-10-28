@@ -16,11 +16,13 @@
       }
     },
     "error": {
-      "cannot_connect": "Unable to connect or authenticate with the BL-HAOS add-on."
+      "cannot_connect": "Unable to connect or authenticate with the BL-HAOS add-on.",
+      "incompatible_version": "This BL-HAOS add-on and integration version are incompatible. Update the older package as indicated by Home Assistant Repairs, then try again."
     },
     "abort": {
       "already_configured": "BL-HAOS Bluetooth Audio is already configured.",
-      "cannot_connect": "Unable to connect or authenticate with the BL-HAOS add-on."
+      "cannot_connect": "Unable to connect or authenticate with the BL-HAOS add-on.",
+      "incompatible_version": "This BL-HAOS add-on and integration version are incompatible. Update the integration or add-on as indicated by Home Assistant Repairs."
     }
   },
   "options": {
@@ -88,6 +90,16 @@
     "set_adapter_power": {
       "name": "Set adapter power",
       "description": "Set Bluetooth adapter power."
+    }
+  },
+  "issues": {
+    "bridge_incompatible": {
+      "title": "BL-HAOS version incompatibility",
+      "description": "The installed add-on version is {observed_addon_version} and requires integration {required_integration_version}; this integration is {observed_integration_version} and requires add-on {required_addon_version}. Update the older package(s), then reload BL-HAOS. Existing pairings and saved settings are preserved."
+    },
+    "bridge_legacy": {
+      "title": "BL-HAOS compatibility cannot be confirmed",
+      "description": "The add-on uses the supported native protocol but does not advertise product versions. Update the add-on to a release that reports compatibility metadata (0.2.71 or newer) to confirm support. Existing protocol-1 operation remains enabled while compatibility is unknown."
     }
   }
 }

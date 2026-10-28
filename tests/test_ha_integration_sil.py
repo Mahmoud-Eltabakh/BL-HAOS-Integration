@@ -12,6 +12,7 @@ import aiohttp
 import pytest
 from homeassistant import config_entries
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import issue_registry as ir
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.bl_haos.const import CONF_ENDPOINT, CONF_LOG_LEVEL, CONF_TOKEN, DOMAIN
@@ -1022,3 +1023,106 @@ async def test_media_player_ignores_resume_when_no_media_is_active(hass, bridge_
         new=AsyncMock(side_effect=aiohttp.ClientError("No active playback to resume")),
     ):
         await player.async_media_play()
+
+async def test_compatibility_repairs_are_stable_recover_and_clear_on_removal(hass):
+    from custom_components.bl_haos.compatibility import (
+        async_update_compatibility_issue,
+        evaluate_identity,
+        issue_id,
+    )
+    from custom_components.bl_haos import async_remove_entry
+
+    entry_id = "compatibility-sil-entry"
+    registry = ir.async_get(hass)
+    legacy = evaluate_identity({"bridge_id": "bl_haos_native_bridge", "version": 1}, "0.2.22")
+    mismatch = evaluate_identity({
+        "bridge_id": "bl_haos_native_bridge", "version": 1,
+        "addon_version": "0.2.69", "min_integration_version": "0.2.22",
+    }, "0.2.22")
+    compatible = evaluate_identity({
+        "bridge_id": "bl_haos_native_bridge", "version": 1,
+        "addon_version": "0.2.71", "min_integration_version": "0.2.22",
+    }, "0.2.22")
+
+    await async_update_compatibility_issue(hass, entry_id, legacy)
+    first = registry.async_get_issue(DOMAIN, issue_id(entry_id))
+    await async_update_compatibility_issue(hass, entry_id, legacy)
+    assert registry.async_get_issue(DOMAIN, issue_id(entry_id)) is not None
+    assert first.severity == ir.IssueSeverity.WARNING
+
+    await async_update_compatibility_issue(hass, entry_id, mismatch)
+    current = registry.async_get_issue(DOMAIN, issue_id(entry_id))
+    assert current.severity == ir.IssueSeverity.ERROR
+    assert current.translation_key == "bridge_incompatible"
+
+    await async_update_compatibility_issue(hass, entry_id, compatible)
+    assert registry.async_get_issue(DOMAIN, issue_id(entry_id)) is None
+
+    await async_update_compatibility_issue(hass, entry_id, mismatch)
+    entry = MockConfigEntry(domain=DOMAIN, entry_id=entry_id, data={})
+    await async_remove_entry(hass, entry)
+    assert registry.async_get_issue(DOMAIN, issue_id(entry_id)) is None
+
+
+async def test_setup_mismatch_creates_repair_before_runtime_data(hass, bridge_session):
+    from homeassistant.exceptions import ConfigEntryNotReady
+    from custom_components.bl_haos import async_setup_entry
+    from custom_components.bl_haos.compatibility import issue_id
+
+    bridge_session.identity.update({
+        "addon_version": "0.2.69",
+        "min_integration_version": "0.2.22",
+    })
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="compatibility-setup-failure",
+        data={CONF_ENDPOINT: ENDPOINT, CONF_TOKEN: TOKEN},
+        unique_id="compatibility-setup-failure",
+    )
+    entry.add_to_hass(hass)
+    client_patch, flow_patch = _patch_session(bridge_session)
+    with client_patch, flow_patch, pytest.raises(ConfigEntryNotReady):
+        await async_setup_entry(hass, entry)
+
+    repair = ir.async_get(hass).async_get_issue(DOMAIN, issue_id(entry.entry_id))
+    assert repair is not None
+    assert repair.translation_key == "bridge_incompatible"
+    assert not hasattr(entry, "runtime_data")
+
+
+async def test_reconnect_revalidates_compatibility_and_recovers_repair(hass, bridge_session):
+    from custom_components.bl_haos import compatibility
+    from custom_components.bl_haos.client import BLHAOSClient, IncompatibleBridgeError
+    from custom_components.bl_haos.compatibility import issue_id
+
+    entry_id = "compatibility-reconnect-entry"
+    bridge_session.identity = {
+        "bridge_id": "bl_haos_native_bridge", "version": 1,
+        "addon_version": "0.2.71", "min_integration_version": "0.2.22",
+    }
+    client = BLHAOSClient(hass, ENDPOINT, TOKEN, entry_id)
+    with patch.object(compatibility, "get_installed_integration_version", new=AsyncMock(return_value="0.2.22")), patch(
+        "custom_components.bl_haos.client.async_get_clientsession", return_value=bridge_session
+    ):
+        await client._async_check_bridge_compatibility(bridge_session)
+        assert client.compatibility["status"] == "compatible"
+
+        bridge_session.identity["addon_version"] = "0.2.69"
+        async def stop_after_failure(_delay):
+            client._closed = True
+        with patch("custom_components.bl_haos.client.asyncio.sleep", new=stop_after_failure):
+            await client._async_listen()
+        repair = ir.async_get(hass).async_get_issue(DOMAIN, issue_id(entry_id))
+        assert repair is not None
+        assert repair.translation_key == "bridge_incompatible"
+        assert bridge_session.last_ws_url is None
+
+        bridge_session.identity["addon_version"] = "0.2.71"
+        client._closed = False
+        bridge_session.websocket_available = False
+        async def stop_after_recovery_attempt(_delay):
+            client._closed = True
+        with patch("custom_components.bl_haos.client.asyncio.sleep", new=stop_after_recovery_attempt):
+            await client._async_listen()
+        assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id(entry_id)) is None
+        assert bridge_session.last_ws_url.endswith("/ws/native")
