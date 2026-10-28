@@ -78,7 +78,7 @@ def test_hacs_component_layout_and_manifest():
     manifest = json.loads((COMPONENT / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["domain"] == "bl_haos"
     assert manifest["config_flow"] is True
-    assert manifest["version"] == "0.2.20"
+    assert manifest["version"] == "0.2.21"
 
 
 def test_native_transport_is_discovery_based_and_mqtt_free():
@@ -212,12 +212,27 @@ def test_panel_build_source_and_stable_bundle_contract():
     assert "--neu-page" in compiled
     assert "Play playlist" in compiled
     assert "Playback queue" in compiled
+    for marker in ("Create playlist", "Save changes", "Browse media"):
+        assert marker in compiled
+    management_markers = (
+        "Speakers", "Pairing PIN", "Save speaker settings", "System settings",
+        "Global auto-reconnect", "bl_haos/speakers/scan", "bl_haos/speakers/system-settings/update",
+    )
+    for marker in management_markers:
+        assert marker in compiled
+    assert "/api/devices/pair" not in compiled
+    assert "/api/scan/start" not in compiled
     source = (panel / "src" / "media-panel.tsx").read_text(encoding="utf-8")
+    management_source = (panel / "src" / "speaker-management.tsx").read_text(encoding="utf-8")
+    for marker in ("Create playlist", "Save changes", "Browse media"):
+        assert marker in source
+    for marker in management_markers:
+        assert marker in source + management_source
     for forbidden in ("localStorage", "sessionStorage", "resolve_media", "apiClient", "window.", "parent.", "fetch(", "Authorization", "Bearer "):
         assert forbidden not in source
 
 
-def test_panel_bundle_matches_fresh_build(tmp_path):
+def test_panel_bundle_matches_fresh_build():
     panel = ROOT / "panel_ui"
     bundle = COMPONENT / "panel_static" / "bl-haos-media-panel.js"
     packaged_bytes_before = bundle.read_bytes()
@@ -228,25 +243,40 @@ def test_panel_bundle_matches_fresh_build(tmp_path):
     if node is None or npm is None or not vite_package.is_file() or not typescript_package.is_file():
         pytest.skip("Node.js, npm, Vite, and TypeScript are required for the local bundle parity check")
 
-    build_dir = tmp_path / "panel-build"
-    subprocess.run(
-        [
-            npm,
-            "--prefix",
-            str(panel),
-            "run",
-            "build",
-            "--",
-            "--outDir",
-            str(build_dir),
-        ],
-        cwd=ROOT,
-        check=True,
-    )
-    assert {path.name for path in build_dir.iterdir()} == {bundle.name}
-    fresh_bundle = build_dir / bundle.name
-    fresh_compiled = fresh_bundle.read_text(encoding="utf-8")
-    assert "Play playlist" in fresh_compiled
-    assert "Playback queue" in fresh_compiled
-    assert filecmp.cmp(fresh_bundle, bundle, shallow=False), "tracked panel bundle differs from a fresh Vite build"
-    assert bundle.read_bytes() == packaged_bytes_before, "isolated parity build modified the tracked package bundle"
+    build_dir = ROOT / ".panel-build-parity"
+    if build_dir.exists():
+        shutil.rmtree(build_dir)
+    try:
+        subprocess.run(
+            [
+                npm,
+                "--prefix",
+                str(panel),
+                "run",
+                "build",
+                "--",
+                "--outDir",
+                str(build_dir),
+            ],
+            cwd=ROOT,
+            check=True,
+        )
+        assert {path.name for path in build_dir.iterdir()} == {bundle.name}
+        fresh_bundle = build_dir / bundle.name
+        fresh_compiled = fresh_bundle.read_text(encoding="utf-8")
+        assert "Play playlist" in fresh_compiled
+        assert "Playback queue" in fresh_compiled
+        for marker in ("Create playlist", "Save changes", "Browse media"):
+            assert marker in fresh_compiled
+        management_markers = (
+            "Speakers", "Pairing PIN", "Save speaker settings", "System settings",
+            "Global auto-reconnect", "bl_haos/speakers/scan", "bl_haos/speakers/system-settings/update",
+        )
+        for marker in management_markers:
+            assert marker in fresh_compiled
+        assert "/api/devices/pair" not in fresh_compiled
+        assert "/api/scan/start" not in fresh_compiled
+        assert filecmp.cmp(fresh_bundle, bundle, shallow=False), "tracked panel bundle differs from a fresh Vite build"
+        assert bundle.read_bytes() == packaged_bytes_before, "isolated parity build modified the tracked package bundle"
+    finally:
+        shutil.rmtree(build_dir, ignore_errors=True)

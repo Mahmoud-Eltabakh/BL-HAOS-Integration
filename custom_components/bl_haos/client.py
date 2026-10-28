@@ -14,6 +14,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import aiohttp
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
@@ -75,6 +76,26 @@ _LOG_OPERATIONS = {
 _SINGLE_ATTEMPT_OPERATIONS = frozenset(
     {"play_media", "queue_start", "next", "previous"}
 )
+_SAFE_MANAGEMENT_REASONS = frozenset({
+    "Bluetooth pairing is already in progress",
+    "Bluetooth connection is already in progress",
+    "Pairing failed",
+    "Connection failed",
+    "Disconnection failed",
+    "Device removal failed",
+    "Bluetooth scan failed",
+    "Bluetooth adapter was not found",
+    "Bluetooth adapter update failed",
+    "Bluetooth adapter list is unavailable",
+    "Bluetooth device list is unavailable",
+    "Speaker settings update failed",
+    "System settings update failed",
+    "Speaker alias is invalid",
+    "Codec override is invalid",
+    "Invalid Bluetooth address",
+    "Invalid Bluetooth adapter",
+})
+
 # The add-on restarts on every add-on update, config change, or Supervisor
 # restart, and each restart drops the event stream. Logging every retry turns a
 # single restart into a burst of warnings in the Home Assistant log, so an outage
@@ -296,6 +317,115 @@ class BLHAOSClient:
             # bare KeyError from the cache lookup.
             raise aiohttp.ClientError("Speaker is no longer a trusted audio sink")
         return self.speakers[normalized]
+
+    @trace_call
+    async def _async_management_request(
+        self, method: str, resource: str, payload: dict[str, Any] | None = None
+    ) -> Any:
+        session = async_get_clientsession(self.hass)
+        request = getattr(session, method.lower())
+        kwargs: dict[str, Any] = {"headers": self._headers, "timeout": _COMMAND_TIMEOUT}
+        if payload is not None:
+            kwargs["json"] = payload
+        async with request(f"{self.endpoint}{NATIVE_API_PATH}{resource}", **kwargs) as response:
+            body = await response.json(content_type=None)
+            if response.status >= HTTPStatus.BAD_REQUEST:
+                detail = body.get(PAYLOAD_DETAIL_KEY) if isinstance(body, dict) else None
+                reason = detail if isinstance(detail, str) and detail in _SAFE_MANAGEMENT_REASONS else "Bluetooth action failed"
+                raise HomeAssistantError(reason)
+            return body
+
+    @trace_call
+    async def async_scan(self, start: bool, adapter_name: str | None = None) -> Any:
+        resource = "/scan/start" if start else "/scan/stop"
+        payload = {"adapter_name": adapter_name} if adapter_name else {}
+        return await self._async_management_request("post", resource, payload)
+
+    @trace_call
+    async def async_list_devices(self) -> list[dict[str, Any]]:
+        result = await self._async_management_request("get", "/devices")
+        return result if isinstance(result, list) else []
+
+    @trace_call
+    async def async_pair(self, address: str, pin: str | None = None) -> Any:
+        normalized = normalize_address(address)
+        if normalized is None:
+            raise HomeAssistantError("Invalid Bluetooth address")
+        return await self._async_management_request("post", "/devices/pair", {"address": normalized, "pin": pin})
+
+    @trace_call
+    async def async_connect(self, address: str) -> Any:
+        normalized = normalize_address(address)
+        if normalized is None:
+            raise HomeAssistantError("Invalid Bluetooth address")
+        return await self._async_management_request("post", f"/devices/{normalized}/connect")
+
+    @trace_call
+    async def async_disconnect(self, address: str) -> Any:
+        normalized = normalize_address(address)
+        if normalized is None:
+            raise HomeAssistantError("Invalid Bluetooth address")
+        return await self._async_management_request("post", f"/devices/{normalized}/disconnect")
+
+    @trace_call
+    async def async_remove(self, address: str) -> Any:
+        normalized = normalize_address(address)
+        if normalized is None:
+            raise HomeAssistantError("Invalid Bluetooth address")
+        return await self._async_management_request("delete", f"/devices/{normalized}")
+
+    @trace_call
+    async def async_get_settings(self) -> dict[str, Any]:
+        result = await self._async_management_request("get", "/settings")
+        return result if isinstance(result, dict) else {}
+
+    @trace_call
+    async def async_update_speaker_settings(self, address: str, **fields: Any) -> Any:
+        normalized = normalize_address(address)
+        allowed = {"custom_alias", "auto_reconnect", "preferred_adapter", "default_volume", "codec_override"}
+        if normalized is None:
+            raise HomeAssistantError("Invalid Bluetooth address")
+        if set(fields) - allowed:
+            raise HomeAssistantError("Speaker settings update failed")
+        alias = fields.get("custom_alias")
+        if alias is not None and (not isinstance(alias, str) or len(alias) > 64 or any(ord(char) < 32 for char in alias)):
+            raise HomeAssistantError("Speaker alias is invalid")
+        volume = fields.get("default_volume")
+        if volume is not None and (not isinstance(volume, int) or not 0 <= volume <= 100):
+            raise HomeAssistantError("Speaker settings update failed")
+        codec = fields.get("codec_override")
+        if codec is not None and codec not in {"auto", "sbc", "sbc_xq", "aac", "aptx", "aptx_hd", "ldac"}:
+            raise HomeAssistantError("Codec override is invalid")
+        adapter = fields.get("preferred_adapter")
+        if adapter is not None and (not isinstance(adapter, str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,32}", adapter)):
+            raise HomeAssistantError("Speaker settings update failed")
+        return await self._async_management_request("put", f"/settings/speakers/{normalized}", fields)
+
+    @trace_call
+    async def async_update_system_settings(self, **fields: Any) -> Any:
+        allowed = {"log_level", "default_codec", "auto_reconnect_enabled"}
+        if not fields or set(fields) - allowed:
+            raise HomeAssistantError("System settings update failed")
+        if "log_level" in fields and fields["log_level"] not in {"trace", "debug", "info", "notice", "warning", "error", "fatal"}:
+            raise HomeAssistantError("System settings update failed")
+        if "default_codec" in fields and fields["default_codec"] not in {"auto", "sbc", "sbc_xq", "aac", "aptx", "aptx_hd", "ldac"}:
+            raise HomeAssistantError("System settings update failed")
+        if "auto_reconnect_enabled" in fields and not isinstance(fields["auto_reconnect_enabled"], bool):
+            raise HomeAssistantError("System settings update failed")
+        return await self._async_management_request("put", "/settings/system", fields)
+
+    @trace_call
+    async def async_list_adapters(self) -> list[dict[str, Any]]:
+        result = await self._async_management_request("get", "/adapters")
+        return result if isinstance(result, list) else []
+
+    @trace_call
+    async def async_set_adapter_power(self, adapter_name: str, powered: bool) -> Any:
+        if not isinstance(adapter_name, str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,32}", adapter_name):
+            raise HomeAssistantError("Bluetooth adapter update failed")
+        return await self._async_management_request(
+            "post", f"/adapters/{adapter_name}/power", {"powered": bool(powered)}
+        )
 
     @trace_call
     def async_add_listener(self, listener: Callable[[str], None]) -> Callable[[], None]:

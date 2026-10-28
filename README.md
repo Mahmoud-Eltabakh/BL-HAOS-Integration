@@ -95,6 +95,38 @@ HA-shell acceptance still require the phase 24 target-host checks.
 
 The integration derives the add-on's private hostname from Supervisor discovery, validates `GET /api/native/identity`, then reads `GET /api/native/speakers` and listens on `/ws/native` for updates. The Bridge add-on pushes its native token and configured `log_level` through the same Supervisor discovery message, so discovered integration logging stays synchronized with the add-on without changing Home Assistant's global logger. Existing entries refresh these values and reload themselves when the add-on rotates its token or changes log level. A manual local endpoint and token entry are available only as a fallback; manually configured entries default to `info`.
 
+
+## Pairing, Speaker Management, and Settings
+
+The integration's **Speakers** panel view provides discovery scanning, pairing
+(with an optional PIN), connect/disconnect, removal, renaming, per-speaker
+settings, and Bluetooth adapter power controls. The integration options flow
+also lets an administrator choose a paired speaker and edit its alias,
+auto-reconnect preference, preferred adapter, default volume, and codec override.
+
+The `bl_haos` domain exposes admin-only services:
+
+| Service | Fields |
+|---|---|
+| `scan_start`, `scan_stop` | Optional `adapter_name` |
+| `pair` | Required `address`; optional `pin` |
+| `connect`, `disconnect`, `remove` | Required `address` |
+| `rename` | Required `address`, `custom_alias` (empty string clears the alias) |
+| `update_speaker_settings` | Required `address`; optional `custom_alias`, `auto_reconnect`, `preferred_adapter`, `default_volume` (0–100), `codec_override` |
+| `update_system_settings` | Optional `log_level`, `default_codec`, `auto_reconnect_enabled` |
+| `set_adapter_power` | Required `adapter_name`, `powered` |
+
+When more than one BL-HAOS config entry is present, pass `config_entry_id` to
+select the target. For example, `bl_haos.pair` accepts `address: "AA:BB:CC:DD:EE:FF"`
+and `pin: "1234"`; `bl_haos.update_system_settings` accepts
+`default_codec: "ldac"` or `auto_reconnect_enabled: false`.
+
+System setting edits update the bridge-managed `ConfigStore` fields through its
+authenticated native API. They do not call the Supervisor add-on options API or
+handle a Supervisor token. `native_token`, demo configuration, and player tuning
+are not exposed by the management view. These local changes are not live-host
+acceptance or deployment evidence.
+
 ## Speakers that are switched off, and speakers that are gone
 
 A trusted speaker that is switched off (or out of range) keeps its identity but

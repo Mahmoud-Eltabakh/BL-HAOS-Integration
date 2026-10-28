@@ -1,0 +1,177 @@
+scan_start:
+  name: Start Bluetooth scan
+  description: Start scanning for nearby Bluetooth audio devices.
+  fields:
+    config_entry_id:
+      name: Config entry ID
+      description: Optional when exactly one BL-HAOS integration is configured.
+      selector:
+        text:
+    adapter_name:
+      name: Adapter
+      description: Optional Bluetooth adapter interface, for example hci0.
+      selector:
+        text:
+scan_stop:
+  name: Stop Bluetooth scan
+  description: Stop scanning for nearby Bluetooth audio devices.
+  fields:
+    config_entry_id:
+      name: Config entry ID
+      selector:
+        text:
+    adapter_name:
+      name: Adapter
+      selector:
+        text:
+pair:
+  name: Pair speaker
+  description: Pair and trust a Bluetooth speaker.
+  fields:
+    config_entry_id:
+      name: Config entry ID
+      selector:
+        text:
+    address:
+      name: Bluetooth address
+      required: true
+      selector:
+        text:
+    pin:
+      name: PIN
+      selector:
+        text:
+connect:
+  name: Connect speaker
+  description: Connect to a paired Bluetooth speaker.
+  fields:
+    config_entry_id:
+      name: Config entry ID
+      selector:
+        text:
+    address:
+      name: Bluetooth address
+      required: true
+      selector:
+        text:
+disconnect:
+  name: Disconnect speaker
+  description: Disconnect a Bluetooth speaker without removing it.
+  fields:
+    config_entry_id:
+      name: Config entry ID
+      selector:
+        text:
+    address:
+      name: Bluetooth address
+      required: true
+      selector:
+        text:
+remove:
+  name: Remove speaker
+  description: Remove a paired Bluetooth speaker from the bridge.
+  fields:
+    config_entry_id:
+      name: Config entry ID
+      selector:
+        text:
+    address:
+      name: Bluetooth address
+      required: true
+      selector:
+        text:
+rename:
+  name: Rename speaker
+  description: Set or clear a speaker's custom alias; use an empty string to clear it.
+  fields:
+    config_entry_id:
+      name: Config entry ID
+      selector:
+        text:
+    address:
+      name: Bluetooth address
+      required: true
+      selector:
+        text:
+    custom_alias:
+      name: Custom alias
+      required: true
+      selector:
+        text:
+update_speaker_settings:
+  name: Update speaker settings
+  description: Update per-speaker reconnect, adapter, volume, codec, or alias settings.
+  fields:
+    config_entry_id:
+      name: Config entry ID
+      selector:
+        text:
+    address:
+      name: Bluetooth address
+      required: true
+      selector:
+        text:
+    custom_alias:
+      name: Custom alias
+      selector:
+        text:
+    auto_reconnect:
+      name: Auto-reconnect
+      selector:
+        boolean:
+    preferred_adapter:
+      name: Preferred adapter
+      selector:
+        text:
+    default_volume:
+      name: Default volume
+      selector:
+        number:
+          min: 0
+          max: 100
+          mode: slider
+    codec_override:
+      name: Codec override
+      selector:
+        select:
+          options: [auto, sbc, sbc_xq, aac, aptx, aptx_hd, ldac]
+update_system_settings:
+  name: Update system settings
+  description: Update the bridge-managed log level, default codec, or global auto-reconnect setting.
+  fields:
+    config_entry_id:
+      name: Config entry ID
+      selector:
+        text:
+    log_level:
+      name: Log level
+      selector:
+        select:
+          options: [trace, debug, info, notice, warning, error, fatal]
+    default_codec:
+      name: Default codec
+      selector:
+        select:
+          options: [auto, sbc, sbc_xq, aac, aptx, aptx_hd, ldac]
+    auto_reconnect_enabled:
+      name: Auto-reconnect enabled
+      selector:
+        boolean:
+set_adapter_power:
+  name: Set adapter power
+  description: Turn a Bluetooth adapter on or off.
+  fields:
+    config_entry_id:
+      name: Config entry ID
+      selector:
+        text:
+    adapter_name:
+      name: Adapter interface
+      required: true
+      selector:
+        text:
+    powered:
+      name: Powered
+      required: true
+      selector:
+        boolean:

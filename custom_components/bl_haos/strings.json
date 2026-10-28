@@ -22,5 +22,72 @@
       "already_configured": "BL-HAOS Bluetooth Audio is already configured.",
       "cannot_connect": "Unable to connect or authenticate with the BL-HAOS add-on."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Speaker settings",
+        "description": "Choose a paired speaker to edit its settings.",
+        "data": {
+          "address": "Speaker"
+        }
+      },
+      "speaker": {
+        "title": "Speaker settings",
+        "description": "Changes are saved to the bridge.",
+        "data": {
+          "custom_alias": "Custom alias",
+          "auto_reconnect": "Auto-reconnect",
+          "preferred_adapter": "Preferred adapter",
+          "default_volume": "Default volume",
+          "codec_override": "Codec override"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Unable to load or save speaker settings."
+    }
+  },
+  "services": {
+    "scan_start": {
+      "name": "Start Bluetooth scan",
+      "description": "Scan for nearby Bluetooth devices."
+    },
+    "scan_stop": {
+      "name": "Stop Bluetooth scan",
+      "description": "Stop the active Bluetooth scan."
+    },
+    "pair": {
+      "name": "Pair speaker",
+      "description": "Pair and trust a Bluetooth speaker."
+    },
+    "connect": {
+      "name": "Connect speaker",
+      "description": "Connect to a paired speaker."
+    },
+    "disconnect": {
+      "name": "Disconnect speaker",
+      "description": "Disconnect a paired speaker."
+    },
+    "remove": {
+      "name": "Remove speaker",
+      "description": "Remove a paired speaker."
+    },
+    "rename": {
+      "name": "Rename speaker",
+      "description": "Set or clear a speaker alias."
+    },
+    "update_speaker_settings": {
+      "name": "Update speaker settings",
+      "description": "Update per-speaker settings."
+    },
+    "update_system_settings": {
+      "name": "Update system settings",
+      "description": "Update log level, default codec, or global auto-reconnect."
+    },
+    "set_adapter_power": {
+      "name": "Set adapter power",
+      "description": "Set Bluetooth adapter power."
+    }
   }
 }

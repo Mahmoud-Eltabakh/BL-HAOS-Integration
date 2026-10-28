@@ -42,6 +42,82 @@ describe('saved playlist library tracer', () => {
     expect(hass.callService).not.toHaveBeenCalled();
   });
 
+  it('browses an exact HA reference, saves it, and starts that playlist on the selected speaker', async () => {
+    const recordId = 'c3f8941d-7e2b-4a11-8b3f-5c6d7e8f9012';
+    const mediaContentId = 'media-source://provider/track%2Fopaque?slot=a%2Bb';
+    const entry = {
+      media_content_id: mediaContentId,
+      title: 'Browseable audio',
+      media_class: 'music',
+      media_content_type: 'audio/mpeg',
+    };
+    const savedRecord = {
+      record_id: recordId, record_revision: 1, kind: 'custom' as const,
+      name: 'Road mix', entries: [entry],
+    };
+    const root: BrowseMedia = {
+      title: 'Media sources', media_content_id: 'media-source://', media_content_type: 'app',
+      can_play: false, can_expand: true,
+      children: [{ ...entry, can_play: true, can_expand: false }],
+    };
+    vi.stubGlobal('crypto', { randomUUID: () => recordId });
+    const hass: Hass = {
+      connection: { connected: true },
+      user: { id: 'local-user' },
+      states: {
+        'media_player.kitchen': { entity_id: 'media_player.kitchen', state: 'idle', attributes: {
+          friendly_name: 'Kitchen', bluetooth_address: 'aa:bb:cc:dd:ee:01', adapter: 'hci0',
+        } },
+      },
+      callWS: vi.fn<Hass['callWS']>(async (message) => {
+        if (message.type === 'bl_haos/playlist_library/list') return { revision: 0, records: [] };
+        if (message.type === 'media_source/browse_media') return root;
+        if (message.type === 'bl_haos/playlist_library/save_custom') {
+          return { revision: 1, records: [savedRecord] } as unknown as BrowseMedia;
+        }
+        if (message.type === 'bl_haos/playlist_library/start') {
+          return { revision: 1, records: [savedRecord] } as unknown as BrowseMedia;
+        }
+        throw new Error(`Unexpected command: ${message.type}`);
+      }),
+      callService: vi.fn(async () => undefined),
+    };
+
+    render(<MediaPanel hass={hass} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Create playlist' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Create playlist' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Playlist name' }), { target: { value: 'Road mix' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add media' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Add media Browseable audio' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save playlist' }));
+    await screen.findByText('Road mix');
+    fireEvent.change(screen.getByRole('combobox', { name: 'Play on' }), { target: { value: 'media_player.kitchen' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Play playlist Road mix' }));
+
+    await waitFor(() => expect(hass.callWS).toHaveBeenLastCalledWith({
+      type: 'bl_haos/playlist_library/start', record_id: recordId, entity_id: 'media_player.kitchen',
+    }));
+    const calls = vi.mocked(hass.callWS).mock.calls.map(([message]) => message);
+    expect(calls.map((message) => message.type)).toEqual([
+      'bl_haos/playlist_library/list',
+      'media_source/browse_media',
+      'bl_haos/playlist_library/save_custom',
+      'bl_haos/playlist_library/start',
+    ]);
+    expect(calls[1]).toEqual({ type: 'media_source/browse_media' });
+    expect(calls[2]).toEqual({
+      type: 'bl_haos/playlist_library/save_custom',
+      record_id: recordId,
+      name: 'Road mix',
+      entries: [entry],
+      revision: 0,
+    });
+    expect(calls[3]).toEqual({
+      type: 'bl_haos/playlist_library/start', record_id: recordId, entity_id: 'media_player.kitchen',
+    });
+    expect(hass.callService).not.toHaveBeenCalled();
+  });
+
   it('keeps a failed library load out of the empty state and disables mutations', async () => {
     const hass: Hass = {
       connection: { connected: true },

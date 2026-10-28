@@ -190,6 +190,11 @@ async def test_native_queue_controls_are_capability_gated_and_use_shared_snapsho
     address = "aa:bb:cc:dd:ee:01"
     speaker = bridge_session.speakers["speakers"][address]
     speaker["queue_version"] = 1
+    entry.runtime_data.client._async_process_speaker(speaker)
+    no_queue_only = MediaPlayerEntityFeature.SHUFFLE_SET | MediaPlayerEntityFeature.REPEAT_SET
+    assert not player.supported_features & no_queue_only
+    assert player.supported_features & MediaPlayerEntityFeature.NEXT_TRACK
+
     speaker["playback"]["queue"] = {
         "status": "playing",
         "playlist": "Saved queue",

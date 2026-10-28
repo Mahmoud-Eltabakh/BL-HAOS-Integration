@@ -84,6 +84,12 @@ class FakeSession:
         self.websocket_messages: list[Any] = []
         self.last_ws_url: str | None = None
         self.commands: list[tuple[str, dict[str, Any]]] = []
+        self.management_calls: list[tuple[str, str, dict[str, Any]]] = []
+        self.management_devices: list[dict[str, Any]] = []
+        self.management_settings: dict[str, Any] = {"speakers": {}}
+        self.management_adapters: list[dict[str, Any]] = []
+        self.management_response: dict[str, Any] = {"status": "ok"}
+        self.management_status: int = 200
         self.command_response: dict[str, Any] | Exception | tuple[dict[str, Any], int] = {}
         self.command_status: int = 200
 
@@ -95,12 +101,22 @@ class FakeSession:
             return FakeResponse(self.identity)
         if url.endswith("/speakers"):
             return FakeResponse(self.speakers)
+        if url.endswith("/devices"):
+            return FakeResponse(self.management_devices)
+        if url.endswith("/settings"):
+            return FakeResponse(self.management_settings)
+        if url.endswith("/adapters"):
+            return FakeResponse(self.management_adapters)
         raise AssertionError(f"Unexpected SIL GET: {url}")
 
     def post(self, url: str, **kwargs: Any) -> FakeResponse:
         """Record the command payload and reply with the configured response."""
         payload = kwargs.get("json")
-        self.commands.append((url, payload if isinstance(payload, dict) else {}))
+        if url.endswith("/command"):
+            self.commands.append((url, payload if isinstance(payload, dict) else {}))
+        else:
+            self.management_calls.append(("POST", url, payload if isinstance(payload, dict) else {}))
+            return FakeResponse(self.management_response, status=self.management_status)
         response = self.command_response
         if isinstance(response, Exception):
             raise response
@@ -108,6 +124,16 @@ class FakeSession:
             body, status = response
             return FakeResponse(body, status=status)
         return FakeResponse(response, status=self.command_status)
+
+    def put(self, url: str, **kwargs: Any) -> FakeResponse:
+        payload = kwargs.get("json")
+        self.management_calls.append(("PUT", url, payload if isinstance(payload, dict) else {}))
+        return FakeResponse(self.management_response, status=self.management_status)
+
+    def delete(self, url: str, **kwargs: Any) -> FakeResponse:
+        payload = kwargs.get("json")
+        self.management_calls.append(("DELETE", url, payload if isinstance(payload, dict) else {}))
+        return FakeResponse(self.management_response, status=self.management_status)
 
     def ws_connect(self, url: str, **kwargs: Any) -> FakeWebSocket:
         self.last_ws_url = url

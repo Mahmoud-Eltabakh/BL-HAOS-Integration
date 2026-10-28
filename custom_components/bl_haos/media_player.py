@@ -308,9 +308,12 @@ class BLHAOSMediaPlayer(MediaPlayerEntity):
             features |= (
                 MediaPlayerEntityFeature.NEXT_TRACK
                 | MediaPlayerEntityFeature.PREVIOUS_TRACK
-                | MediaPlayerEntityFeature.SHUFFLE_SET
-                | MediaPlayerEntityFeature.REPEAT_SET
             )
+            if self._queue:
+                features |= (
+                    MediaPlayerEntityFeature.SHUFFLE_SET
+                    | MediaPlayerEntityFeature.REPEAT_SET
+                )
         return features
 
     @property

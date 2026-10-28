@@ -16,3 +16,10 @@ class ConfigFlow:
     def __init_subclass__(cls, domain: str | None = None, **kwargs) -> None:
         super().__init_subclass__(**kwargs)
         cls.domain = domain
+
+
+class OptionsFlow:
+    """Import-only placeholder for integration option-flow unit tests."""
+
+    def __init_subclass__(cls, **kwargs) -> None:
+        super().__init_subclass__(**kwargs)

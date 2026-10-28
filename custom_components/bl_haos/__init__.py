@@ -18,7 +18,6 @@ import logging
 
 from .client import BLHAOSClient
 from .const import CONF_ENDPOINT, CONF_LOG_LEVEL, CONF_TOKEN, DOMAIN, INTEGRATION_LOGGER, PLATFORMS, get_logger, normalize_log_level
-from .playlist_library import async_setup
 
 from .call_trace import trace_call
 
@@ -139,8 +138,22 @@ class BLHAOSRuntime:
 
 
 @trace_call
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    """Register integration-wide playlist and speaker-management surfaces."""
+    from . import speaker_management
+    from .playlist_library import async_setup as async_setup_playlist_library
+
+    await async_setup_playlist_library(hass, config)
+    await speaker_management.async_setup(hass, config)
+    return True
+
+
+@trace_call
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up BL-HAOS from a config entry."""
+    from . import speaker_management
+
+    await speaker_management.async_setup(hass, {})
     effective_log_level = normalize_log_level(entry.data.get(CONF_LOG_LEVEL))
     logging.getLogger(INTEGRATION_LOGGER).setLevel(effective_log_level.upper())
     _LOGGER.debug(
@@ -165,6 +178,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await client.async_close()
         raise ConfigEntryNotReady("BL-HAOS add-on is unavailable") from error
     entry.runtime_data = BLHAOSRuntime(client)
+    await speaker_management.async_entry_setup(hass, entry.entry_id)
     panel = hass.data.setdefault(_PANEL_DATA, _PanelOwners())
     platforms_started = False
     try:
@@ -192,6 +206,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 @trace_call
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a BL-HAOS config entry."""
+    from . import speaker_management
+
     _LOGGER.debug("Unloading BL-HAOS config entry %s", entry.entry_id)
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
@@ -202,6 +218,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Platform unload detaches entities but leaves their last state behind
         # as a restored/unavailable placeholder; remove the states so a reload
         # does not briefly show stale unavailable players.
+        await speaker_management.async_unload_entry(hass, entry.entry_id)
         registry = er.async_get(hass)
         for entity in er.async_entries_for_config_entry(registry, entry.entry_id):
             hass.states.async_remove(entity.entity_id)

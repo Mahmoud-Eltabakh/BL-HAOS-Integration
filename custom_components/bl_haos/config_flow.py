@@ -7,8 +7,10 @@ from urllib.parse import urlsplit
 import aiohttp
 import voluptuous as vol
 from homeassistant import config_entries
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
+from .client import BLHAOSClient
 from .const import (
     ADDON_HOSTNAME_SLUG,
     ADDON_SLUG,
@@ -42,10 +44,77 @@ from .call_trace import trace_call
 _LOGGER = get_logger(__name__)
 
 
+class BLHAOSOptionsFlow(config_entries.OptionsFlow):
+    """Edit one paired speaker through the authenticated bridge client."""
+
+    @trace_call
+    def __init__(self, config_entry):
+        self._entry = config_entry
+        self._selected_address: str | None = None
+        self._speaker_settings: dict = {}
+
+    @trace_call
+    async def async_step_init(self, user_input=None):
+        client: BLHAOSClient = self._entry.runtime_data.client
+        try:
+            if user_input is not None:
+                self._selected_address = user_input["address"]
+                settings = await client.async_get_settings()
+                self._speaker_settings = settings.get("speakers", {}).get(self._selected_address, {})
+                return await self.async_step_speaker()
+            devices = await client.async_list_devices()
+        except (HomeAssistantError, KeyError, AttributeError):
+            return self.async_show_form(step_id="init", data_schema=vol.Schema({}), errors={"base": "cannot_connect"})
+        choices = {
+            device["address"]: device.get("name") or device["address"]
+            for device in devices
+            if device.get("paired") or device.get("trusted")
+        }
+        if not choices:
+            return self.async_show_form(step_id="init", data_schema=vol.Schema({}), errors={"base": "no_speakers"})
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema({vol.Required("address"): vol.In(choices)}),
+        )
+
+    @trace_call
+    async def async_step_speaker(self, user_input=None):
+        client: BLHAOSClient = self._entry.runtime_data.client
+        if user_input is not None:
+            try:
+                changes = dict(user_input)
+                changes["custom_alias"] = changes.get("custom_alias", "")
+                changes["preferred_adapter"] = changes.get("preferred_adapter") or None
+                changes["codec_override"] = changes.get("codec_override") or None
+                await client.async_update_speaker_settings(self._selected_address, **changes)
+            except HomeAssistantError:
+                return self.async_show_form(
+                    step_id="speaker", data_schema=self._speaker_schema(), errors={"base": "cannot_connect"}
+                )
+            return self.async_create_entry(title="", data={})
+        return self.async_show_form(step_id="speaker", data_schema=self._speaker_schema())
+
+    @trace_call
+    def _speaker_schema(self):
+        settings = self._speaker_settings
+        return vol.Schema({
+            vol.Optional("custom_alias", default=settings.get("custom_alias") or ""): str,
+            vol.Optional("auto_reconnect", default=settings.get("auto_reconnect", True)): bool,
+            vol.Optional("preferred_adapter", default=settings.get("preferred_adapter") or ""): str,
+            vol.Optional("default_volume", default=settings.get("default_volume", 50)): vol.All(int, vol.Range(min=0, max=100)),
+            vol.Optional("codec_override", default=settings.get("codec_override") or ""): vol.In(["", "auto", "sbc", "sbc_xq", "aac", "aptx", "aptx_hd", "ldac"]),
+        })
+
+
 class BLHAOSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Configure one local BL-HAOS native bridge."""
 
     VERSION = CONFIG_ENTRY_VERSION
+
+    @staticmethod
+    @trace_call
+    def async_get_options_flow(config_entry):
+        return BLHAOSOptionsFlow(config_entry)
 
     @staticmethod
     @trace_call

@@ -212,6 +212,21 @@ async def test_custom_playlist_start_resolves_every_reference_before_one_queue_c
         )
         saved = await websocket.receive_json()
         assert saved["success"] is True
+        saved_library = saved["result"]
+        assert saved_library["records"] == [{
+            "record_id": "c3f8941d-7e2b-4a11-8b3f-5c6d7e8f9012",
+            "record_revision": 1,
+            "kind": "custom",
+            "name": "Ordered queue",
+            "entries": [
+                {"media_content_id": first_reference, "title": "First"},
+                {"media_content_id": second_reference, "title": "Second"},
+            ],
+        }]
+        store_path = Path(hass.data[LIBRARY_DATA].store.path)
+        persisted_before_start = await Store(hass, 1, LIBRARY_STORE_KEY, atomic_writes=True).async_load()
+        persisted_bytes_before_start = store_path.read_bytes()
+        assert persisted_before_start == saved_library
         with (
             patch("custom_components.bl_haos.media_player.async_resolve_media", resolver),
             patch("custom_components.bl_haos.media_player.async_process_play_media_url", processor),
@@ -243,6 +258,8 @@ async def test_custom_playlist_start_resolves_every_reference_before_one_queue_c
         },
     )]
     assert entry.runtime_data.client.get_speaker(address)["queue_version"] == 1
+    assert store_path.read_bytes() == persisted_bytes_before_start
+    assert await Store(hass, 1, LIBRARY_STORE_KEY, atomic_writes=True).async_load() == persisted_before_start
 
 
 async def test_custom_playlist_start_resolution_failure_preserves_existing_queue(
@@ -513,6 +530,66 @@ def _media_entry(
         "media_class": "music",
         "media_content_type": "audio/mpeg",
     }
+
+
+async def test_authenticated_library_read_preserves_custom_and_provider_record_shape(
+    hass, hass_ws_client, socket_enabled, tmp_path
+):
+    hass.config.config_dir = str(tmp_path)
+    await async_setup_component(hass, "websocket_api", {})
+    await async_setup_playlist_library(hass, {})
+    library = hass.data[LIBRARY_DATA]
+    custom_id = "a1111111-1111-4111-8111-111111111111"
+    first_reference = "media-source://provider/first%2Fopaque?slot=1%2Ba"
+    second_reference = "media-source://provider/second%2Fopaque?slot=2%2Bb"
+    provider_reference = "media-source://provider/list%2Fopaque?view=full%2Blist"
+    custom_entries = [_media_entry(first_reference), _media_entry(second_reference)]
+    created_custom = await library.async_save_custom(custom_id, "Saved order", custom_entries, 0)
+    created = await library.async_save_provider(
+        provider_reference,
+        "Provider shortcut label",
+        {"title": "Home Assistant playlist", "media_class": "playlist", "media_content_type": "provider/playlist"},
+    )
+    expected = {
+        "schema_version": 2,
+        "revision": 2,
+        "records": [
+            {
+                "record_id": custom_id,
+                "record_revision": 1,
+                "kind": "custom",
+                "name": "Saved order",
+                "entries": custom_entries,
+            },
+            {
+                "record_id": created["records"][1]["record_id"],
+                "record_revision": 2,
+                "kind": "provider",
+                "name": "Provider shortcut label",
+                "media_content_id": provider_reference,
+                "title": "Home Assistant playlist",
+                "media_class": "playlist",
+                "media_content_type": "provider/playlist",
+            },
+        ],
+    }
+    storage_path = Path(library.store.path)
+    stored_bytes = storage_path.read_bytes()
+
+    async with await hass_ws_client() as websocket:
+        await websocket.send_json_auto_id({"type": "bl_haos/playlist_library/list"})
+        listed = await websocket.receive_json()
+
+    assert listed["success"] is True
+    assert listed["result"] == expected
+    assert [record["record_id"] for record in listed["result"]["records"]] == [
+        custom_id, created["records"][1]["record_id"],
+    ]
+    assert listed["result"]["records"][0]["entries"] == custom_entries
+    assert listed["result"]["records"][1]["media_content_id"] == provider_reference
+    assert listed["result"]["records"][1]["name"] == "Provider shortcut label"
+    assert storage_path.read_bytes() == stored_bytes
+    assert await Store(hass, 1, LIBRARY_STORE_KEY, atomic_writes=True).async_load() == expected
 
 
 async def test_playlist_library_provider_shortcut_retry_and_local_rename_remove(

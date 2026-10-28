@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { ArrowDown, ArrowLeft, ArrowUp, ChevronRight, Music2, Play, Search, X } from 'lucide-react';
+import { SpeakerManagement } from './speaker-management';
 
 export interface BrowseMedia {
   title: string;
@@ -97,6 +98,13 @@ export interface Hass {
     | { type: 'bl_haos/playlist_library/rename_provider'; record_id: string; name: string; revision: number }
     | { type: 'bl_haos/playlist_library/delete_provider'; record_id: string; revision: number }
     | { type: 'bl_haos/playlist_library/start'; record_id: string; entity_id: string }
+    | { type: 'bl_haos/speakers/devices' | 'bl_haos/speakers/settings/get' | 'bl_haos/speakers/adapters/list' }
+    | { type: 'bl_haos/speakers/scan'; start: boolean; adapter_name?: string }
+    | { type: 'bl_haos/speakers/pair'; address: string; pin?: string }
+    | { type: 'bl_haos/speakers/connect' | 'bl_haos/speakers/disconnect' | 'bl_haos/speakers/remove'; address: string }
+    | { type: 'bl_haos/speakers/settings/update'; address: string; custom_alias?: string; auto_reconnect?: boolean; preferred_adapter?: string | null; default_volume?: number; codec_override?: string | null }
+    | { type: 'bl_haos/speakers/system-settings/update'; log_level?: string; default_codec?: string; auto_reconnect_enabled?: boolean }
+    | { type: 'bl_haos/speakers/adapters/power'; adapter_name: string; powered: boolean }
   ): Promise<BrowseMedia | { result: BrowseMedia[] } | PlaylistLibrarySnapshot>;
   callService(
     domain: 'media_player',
@@ -154,6 +162,7 @@ interface BrowseRequest { item?: BrowseMedia; path: BrowseMedia[]; query?: strin
 export function MediaPanel({ hass, initialView = 'library' }: { hass?: Hass; initialView?: 'library' | 'browse' }) {
   const initialViewRef = useRef(initialView);
   const [view, setView] = useState<'library' | 'browse'>(initialView);
+  const [panelTab, setPanelTab] = useState<'media' | 'speakers'>('media');
   const [library, setLibrary] = useState<PlaylistLibrarySnapshot>();
   const [libraryLoading, setLibraryLoading] = useState(false);
   const [libraryError, setLibraryError] = useState('');
@@ -1037,14 +1046,16 @@ export function MediaPanel({ hass, initialView = 'library' }: { hass?: Hass; ini
         }}><X size={20} aria-hidden="true" /></a>
     </header>
     <nav className="view-toggle" aria-label="Media views">
-      <button className="neu-button" type="button" ref={libraryViewButton} aria-pressed={view === 'library'} onClick={() => {
+      <button className="neu-button" type="button" ref={libraryViewButton} aria-pressed={panelTab === 'media' && view === 'library'} onClick={() => {
+        setPanelTab('media');
         setPicker(false);
         setView('library');
         if (!library && !libraryLoading && !libraryError) void loadLibrary();
       }}>Library</button>
-      <button className="neu-button" type="button" ref={browseMediaButton} aria-pressed={view === 'browse'} onClick={openBrowse}>Browse media</button>
+      <button className="neu-button" type="button" ref={browseMediaButton} aria-pressed={panelTab === 'media' && view === 'browse'} onClick={() => { setPanelTab('media'); openBrowse(); }}>Browse media</button>
+      <button className="neu-button" type="button" aria-pressed={panelTab === 'speakers'} onClick={() => setPanelTab('speakers')}>Speakers</button>
     </nav>
-    {view === 'library' ? <>
+    {panelTab === 'speakers' ? <SpeakerManagement hass={hass} /> : view === 'library' ? <>
       {!available && <p role="alert">Your Home Assistant session is unavailable.</p>}
       {libraryError && <div className="error" role="alert"><p>{libraryError}</p>
         <button className="neu-button" disabled={!available || libraryLoading} onClick={() => void loadLibrary()}>Retry loading</button>
