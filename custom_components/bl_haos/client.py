@@ -62,6 +62,19 @@ _MAC_ADDRESS = re.compile(r"^[0-9a-f]{2}(?::[0-9a-f]{2}){5}$")
 _COMMAND_TIMEOUT = aiohttp.ClientTimeout(total=COMMAND_TIMEOUT_SECONDS)
 _IDENTITY_TIMEOUT = aiohttp.ClientTimeout(total=IDENTITY_TIMEOUT_SECONDS)
 _LOGGER = logging.getLogger(__name__)
+_LOG_OPERATIONS = {
+    "play": "play",
+    "pause": "pause",
+    "stop": "stop",
+    "set_volume": "set_volume",
+    "play_media": "play_media",
+    "queue_start": "queue_start",
+    "next": "next",
+    "previous": "previous",
+}
+_SINGLE_ATTEMPT_OPERATIONS = frozenset(
+    {"play_media", "queue_start", "next", "previous"}
+)
 # The add-on restarts on every add-on update, config change, or Supervisor
 # restart, and each restart drops the event stream. Logging every retry turns a
 # single restart into a burst of warnings in the Home Assistant log, so an outage
@@ -210,40 +223,39 @@ class BLHAOSClient:
     async def async_command(self, address: str, operation: str, **options: Any) -> dict[str, Any]:
         """Submit a native command and cache its authoritative acknowledgement.
 
-        The add-on closes idle keep-alive sockets, and a command sent over one of
-        those pooled sockets fails as ``ServerDisconnectedError`` instead of
-        returning a response - which reached the user as "Failed to play_media:
-        Server disconnected". Every native command converges to a target state
-        (``play_media`` stops the previous stream first), so one retry is safe.
+        Retry convergent state commands after a dropped connection, but submit
+        playback replacements and queue navigation only once: a lost
+        acknowledgement does not mean the operation was rejected.
         """
         normalized = normalize_address(address)
         if normalized is None:
             raise aiohttp.ClientError("Invalid Bluetooth address")
         payload = {PAYLOAD_VERSION_KEY: COMMAND_VERSION, PAYLOAD_OPERATION_KEY: operation, **{key: value for key, value in options.items() if value is not None}}
         log_address = _redacted_address(normalized)
-        for attempt in range(1, COMMAND_ATTEMPTS + 1):
+        command_attempts = 1 if operation in _SINGLE_ATTEMPT_OPERATIONS else COMMAND_ATTEMPTS
+        for attempt in range(1, command_attempts + 1):
             started = monotonic()
             _LOGGER.debug(
                 "Sending command '%s' to %s (attempt %d of %d)",
-                operation,
+                _LOG_OPERATIONS.get(operation, "other"),
                 log_address,
                 attempt,
-                COMMAND_ATTEMPTS,
+                command_attempts,
             )
             try:
                 return await self._async_send_command(normalized, payload, operation, log_address, started)
             except aiohttp.ServerDisconnectedError as error:
-                if attempt >= COMMAND_ATTEMPTS:
+                if attempt >= command_attempts:
                     raise aiohttp.ClientError(
-                        f"{CONNECTION_DROPPED_MARKER} ({COMMAND_ATTEMPTS} attempt(s))"
+                        f"{CONNECTION_DROPPED_MARKER} ({command_attempts} attempt(s))"
                     ) from error
                 _LOGGER.debug(
                     "BL-HAOS closed the connection before answering command '%s' to %s; retrying",
-                    operation,
+                    _LOG_OPERATIONS.get(operation, "other"),
                     log_address,
                 )
                 await asyncio.sleep(COMMAND_RETRY_DELAY_SECONDS)
-        raise aiohttp.ClientError(f"{CONNECTION_DROPPED_MARKER} ({COMMAND_ATTEMPTS} attempt(s))")
+        raise aiohttp.ClientError(f"{CONNECTION_DROPPED_MARKER} ({command_attempts} attempt(s))")
 
     @trace_call
     async def _async_send_command(
@@ -266,14 +278,16 @@ class BLHAOSClient:
             if response.status != HTTPStatus.OK:
                 _LOGGER.warning(
                     "Command '%s' to %s failed (HTTP %s) after %.1fs: %s",
-                    operation,
+                    _LOG_OPERATIONS.get(operation, "other"),
                     log_address,
                     response.status,
                     monotonic() - started,
-                    body.get(PAYLOAD_DETAIL_KEY, "unknown error") if isinstance(body, dict) else "invalid response",
+                    "media submission rejected" if operation == "play_media" else (
+                        body.get(PAYLOAD_DETAIL_KEY, "unknown error") if isinstance(body, dict) else "invalid response"
+                    ),
                 )
                 raise self._response_error(response.status, body, "BL-HAOS command failed")
-        _LOGGER.info("Command '%s' to %s completed in %.1fs", operation, log_address, monotonic() - started)
+        _LOGGER.info("Command '%s' to %s completed in %.1fs", _LOG_OPERATIONS.get(operation, "other"), log_address, monotonic() - started)
         self._async_process_speaker(body)
         if normalized not in self.speakers:
             # The bridge ack rejected the record (e.g. the speaker dropped its
@@ -352,7 +366,7 @@ class BLHAOSClient:
             return "stream-timeout", "the add-on did not answer in time"
         if isinstance(failure, aiohttp.ClientError):
             return type(failure).__name__, f"the event stream failed ({type(failure).__name__})"
-        return type(failure).__name__, f"the event stream sent an unexpected payload ({failure})"
+        return "invalid-event", "the event stream sent an unexpected payload"
 
     @trace_call
     def _async_stream_connected(self) -> None:
@@ -434,8 +448,8 @@ class BLHAOSClient:
                             if not isinstance(payload, dict):
                                 raise ValueError("Invalid BL-HAOS native event")
                             if payload.get(PAYLOAD_EVENT_KEY) == EVENT_SPEAKER_UPDATED:
-                                _LOGGER.debug("Received native speaker update event: %s", payload)
                                 address = self._async_process_speaker(payload.get(PAYLOAD_DATA_KEY))
+                                _LOGGER.debug("Received native speaker update event for %s", address or "rejected")
                                 self._async_evict_if_rejected(payload.get(PAYLOAD_DATA_KEY), address)
                 # The stream ended without raising: the add-on closed it, which is
                 # what an add-on restart or update looks like from here.

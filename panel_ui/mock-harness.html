@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BL-HAOS Media Panel Mock Shell</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background-color: #0f172a;
+      color: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <bl-haos-media-panel id="panel"></bl-haos-media-panel>
+  </div>
+  <script type="module">
+    import '/src/media-panel.tsx';
+
+    const mockRoot = {
+      title: 'Media sources',
+      media_content_id: 'media-source://',
+      media_content_type: 'app',
+      can_play: false,
+      can_expand: true,
+      children: [
+        {
+          title: 'Spotify Provider',
+          media_content_id: 'media-source://spotify',
+          media_content_type: 'app',
+          can_play: false,
+          can_expand: true,
+          children: [
+            {
+              title: 'Chill Evening Beats',
+              media_content_id: 'media-source://spotify/playlist/chill-evening',
+              media_content_type: 'playlist',
+              media_class: 'playlist',
+              can_play: true,
+              can_expand: true,
+              children: [
+                {
+                  title: 'Sunset Horizon',
+                  media_content_id: 'media-source://spotify/track/sunset-1',
+                  media_content_type: 'music',
+                  media_class: 'track',
+                  can_play: true,
+                  can_expand: false,
+                },
+                {
+                  title: 'Night Glow',
+                  media_content_id: 'media-source://spotify/track/glow-2',
+                  media_content_type: 'music',
+                  media_class: 'track',
+                  can_play: true,
+                  can_expand: false,
+                }
+              ]
+            },
+            {
+              title: 'Unplayable Item',
+              media_content_id: 'media-source://spotify/podcast/unsupported',
+              media_content_type: 'video',
+              media_class: 'video',
+              can_play: false,
+              can_expand: false,
+            }
+          ]
+        },
+        {
+          title: 'Radio Stations',
+          media_content_id: 'media-source://radio_browser',
+          media_content_type: 'app',
+          can_play: false,
+          can_expand: true,
+          children: [
+            {
+              title: 'BBC Radio 1',
+              media_content_id: 'media-source://radio_browser/bbc1',
+              media_content_type: 'audio/aac',
+              media_class: 'music',
+              can_play: true,
+              can_expand: false,
+            }
+          ]
+        }
+      ]
+    };
+
+    function findItem(root, id) {
+      if (root.media_content_id === id) return root;
+      if (root.children) {
+        for (const child of root.children) {
+          const found = findItem(child, id);
+          if (found) return found;
+        }
+      }
+      return null;
+    }
+
+    const playlistId = 'c3f8941d-7e2b-4a11-8b3f-5c6d7e8f9012';
+    const savedTrack = findItem(mockRoot, 'media-source://spotify/track/sunset-1');
+    const longName = 'Long playlist label '.repeat(6).trim().slice(0, 128);
+    const longTitle = 'Long media title '.repeat(15).trim().slice(0, 200);
+    const responsiveRecords = [
+      {
+        record_id: playlistId,
+        record_revision: 1,
+        kind: 'custom',
+        name: longName,
+        entries: Array.from({ length: 24 }, (_, index) => ({
+          media_content_id: `media-source://spotify/track/overflow-${index}`,
+          title: index === 23 ? longTitle : `Overflow track ${index + 1}`,
+          media_class: 'music',
+          media_content_type: 'audio/mpeg',
+        })),
+      },
+      ...Array.from({ length: 11 }, (_, index) => ({
+        record_id: `custom-overflow-${index + 1}`,
+        record_revision: 1,
+        kind: 'custom',
+        name: `Library playlist ${index + 1}`,
+        entries: [],
+      })),
+      ...Array.from({ length: 12 }, (_, index) => ({
+        record_id: `provider-overflow-${index + 1}`,
+        record_revision: 1,
+        kind: 'provider',
+        name: index === 11 ? longName : `Saved provider playlist ${index + 1}`,
+        media_content_id: `media-source://spotify/playlist/saved-${index + 1}`,
+        title: index === 11 ? longTitle : `Provider playlist ${index + 1}`,
+        media_class: 'playlist',
+        media_content_type: 'playlist',
+      })),
+    ];
+    const availabilityRecords = [
+      {
+        record_id: playlistId,
+        record_revision: 1,
+        kind: 'custom',
+        name: 'Availability mix',
+        entries: [
+          { media_content_id: savedTrack.media_content_id, title: savedTrack.title, media_class: 'track', media_content_type: 'music' },
+          { media_content_id: 'media-source://spotify/track/unavailable%2Fopaque?slot=a%2Bb', title: longTitle, media_class: 'track', media_content_type: 'music' },
+        ],
+      },
+      {
+        record_id: 'provider-availability',
+        record_revision: 1,
+        kind: 'provider',
+        name: 'Saved availability playlist',
+        media_content_id: 'media-source://spotify/playlist/chill-evening',
+        title: 'Chill Evening Beats',
+        media_class: 'playlist',
+        media_content_type: 'playlist',
+      },
+    ];
+    const requestedScenario = new URLSearchParams(location.search).get('scenario');
+    if (requestedScenario === 'responsive') {
+      mockRoot.children.push(...Array.from({ length: 24 }, (_, index) => ({
+        title: index === 23 ? longTitle : `Picker media item ${index + 1}`,
+        media_content_id: `media-source://local/track/picker-${index + 1}`,
+        media_content_type: 'audio/mpeg',
+        media_class: 'music',
+        can_play: true,
+        can_expand: false,
+      })));
+    }
+    const defaultCatalogRecords = [{
+      record_id: 'provider-catalog-default',
+      record_revision: 1,
+      kind: 'provider',
+      name: 'Mock saved playlist',
+      media_content_id: 'media-source://spotify/playlist/chill-evening',
+      title: 'Chill Evening Beats',
+      media_class: 'playlist',
+      media_content_type: 'playlist',
+    }];
+    const queueRecords = [
+      {
+        record_id: 'queue-custom-record',
+        record_revision: 1,
+        kind: 'custom',
+        name: 'Quiet hours',
+        entries: [
+          { media_content_id: 'media-source://spotify/track/sunset-1', title: 'First saved track' },
+          { media_content_id: 'media-source://spotify/track/glow-2', title: 'Second saved track' },
+        ],
+      },
+      {
+        record_id: 'queue-provider-record',
+        record_revision: 1,
+        kind: 'provider',
+        name: 'Provider mix',
+        media_content_id: 'media-source://spotify/playlist/chill-evening',
+        title: 'Provider playlist',
+      },
+    ];
+    const initialQueue = {
+      status: 'playing', playlist: 'Current queue', title: 'Keep this item',
+      position: 18, duration: 120, index: 1, count: 2, shuffle: false, repeat: 'off', error: null,
+    };
+    const initialRecords = requestedScenario === 'responsive' ? responsiveRecords
+      : requestedScenario === 'availability' ? availabilityRecords
+        : requestedScenario === 'queue' ? queueRecords
+        : requestedScenario === 'empty' ? []
+          : requestedScenario === null ? defaultCatalogRecords : [];
+    const mockLibrary = {
+      revision: initialRecords.length ? 1 : 0,
+      records: structuredClone(initialRecords),
+    };
+    const mockFailures = [];
+    const mockCalls = [];
+    const queueItems = {};
+    const resolvedTitles = [];
+    if (requestedScenario === 'queue') queueItems['media_player.kitchen_speaker'] = ['Keep this item', 'Second current item'];
+    let recordSequence = 0;
+
+    function librarySnapshot() {
+      return structuredClone(mockLibrary);
+    }
+
+    function takeFailure(type, afterCommit) {
+      const index = mockFailures.findIndex((failure) => failure.type === type && failure.afterCommit === afterCommit);
+      if (index < 0) return null;
+      return mockFailures.splice(index, 1)[0];
+    }
+
+    function maybeFail(type, afterCommit) {
+      const failure = takeFailure(type, afterCommit);
+      if (failure) throw new Error(failure.message);
+    }
+
+    function checkRevision(message) {
+      if (message.revision !== mockLibrary.revision) {
+        throw new Error('Playlist library changed; reload and retry');
+      }
+    }
+
+    function commitRecords(records) {
+      mockLibrary.records = records;
+      mockLibrary.revision += 1;
+      return librarySnapshot();
+    }
+
+    function handleLibraryCommand(message) {
+      maybeFail(message.type, false);
+      let result;
+
+      if (message.type === 'bl_haos/playlist_library/list') {
+        result = librarySnapshot();
+      } else if (message.type === 'bl_haos/playlist_library/save_custom') {
+        const existing = mockLibrary.records.find((record) => record.record_id === message.record_id);
+        if (existing) {
+          result = librarySnapshot();
+        } else {
+          checkRevision(message);
+          result = commitRecords([...mockLibrary.records, {
+            record_id: message.record_id,
+            record_revision: 1,
+            kind: 'custom',
+            name: message.name,
+            entries: structuredClone(message.entries),
+          }]);
+        }
+      } else if (message.type === 'bl_haos/playlist_library/update_custom') {
+        checkRevision(message);
+        const existing = mockLibrary.records.find((record) => record.record_id === message.record_id && record.kind === 'custom');
+        if (!existing) throw new Error('Playlist not found');
+        result = commitRecords(mockLibrary.records.map((record) => record === existing ? {
+          ...record,
+          record_revision: record.record_revision + 1,
+          name: message.name,
+          entries: structuredClone(message.entries),
+        } : record));
+      } else if (message.type === 'bl_haos/playlist_library/delete_custom') {
+        checkRevision(message);
+        const existing = mockLibrary.records.find((record) => record.record_id === message.record_id && record.kind === 'custom');
+        if (!existing) throw new Error('Playlist not found');
+        result = commitRecords(mockLibrary.records.filter((record) => record !== existing));
+      } else if (message.type === 'bl_haos/playlist_library/save_provider') {
+        const existing = mockLibrary.records.find((record) => record.kind === 'provider' && record.media_content_id === message.media_content_id);
+        if (existing) {
+          result = librarySnapshot();
+        } else {
+          result = commitRecords([...mockLibrary.records, {
+            record_id: `provider-local-${++recordSequence}`,
+            record_revision: 1,
+            kind: 'provider',
+            name: message.name,
+            media_content_id: message.media_content_id,
+            ...(message.title ? { title: message.title } : {}),
+            ...(message.media_class ? { media_class: message.media_class } : {}),
+            ...(message.media_content_type ? { media_content_type: message.media_content_type } : {}),
+          }]);
+        }
+      } else if (message.type === 'bl_haos/playlist_library/rename_provider') {
+        checkRevision(message);
+        const existing = mockLibrary.records.find((record) => record.record_id === message.record_id && record.kind === 'provider');
+        if (!existing) throw new Error('Playlist not found');
+        result = commitRecords(mockLibrary.records.map((record) => record === existing ? {
+          ...record,
+          record_revision: record.record_revision + 1,
+          name: message.name,
+        } : record));
+      } else if (message.type === 'bl_haos/playlist_library/delete_provider') {
+        checkRevision(message);
+        const existing = mockLibrary.records.find((record) => record.record_id === message.record_id && record.kind === 'provider');
+        if (!existing) throw new Error('Playlist not found');
+        result = commitRecords(mockLibrary.records.filter((record) => record !== existing));
+      } else if (message.type === 'bl_haos/playlist_library/start') {
+        if (Object.keys(message).some((key) => !['type', 'record_id', 'entity_id'].includes(key))) {
+          throw new Error('Only saved record and target identity are accepted');
+        }
+        const record = mockLibrary.records.find((candidate) => candidate.record_id === message.record_id);
+        const target = mockHass.states[message.entity_id];
+        if (!record || !target || !['idle', 'playing', 'paused'].includes(target.state)) {
+          throw new Error('Selected target or saved playlist is unavailable');
+        }
+        const entries = record.kind === 'provider'
+          ? [{ media_content_id: record.media_content_id, title: record.title || record.name }]
+          : record.entries;
+        if (!Array.isArray(entries) || entries.length === 0) throw new Error('Playlist has no playable items');
+        const titles = [];
+        resolvedTitles.length = 0;
+        for (const entry of entries) {
+          maybeFail('mock/queue_resolve', false);
+          if (!entry.media_content_id.startsWith('media-source://')) throw new Error('Invalid saved reference');
+          const title = entry.title || `Item ${titles.length + 1}`;
+          resolvedTitles.push(title);
+          titles.push(title);
+        }
+        queueItems[message.entity_id] = titles;
+        publishQueue(message.entity_id, {
+          status: 'playing', playlist: record.name, title: titles[0],
+          position: 0, duration: null, index: 1, count: titles.length,
+          shuffle: false, repeat: 'off', error: null,
+        });
+        result = { record_id: record.record_id, entity_id: message.entity_id, items: titles.length };
+      } else {
+        throw new Error('Unknown playlist library command');
+      }
+
+      maybeFail(message.type, true);
+      return result;
+    }
+
+    const playedCalls = [];
+    const mockLibraryControls = {
+      snapshot: librarySnapshot,
+      calls: mockCalls,
+      failNext(type, message, afterCommit = false) {
+        mockFailures.push({ type, message, afterCommit });
+      },
+      replaceRecord(recordId, updates) {
+        mockLibrary.records = mockLibrary.records.map((record) => record.record_id === recordId
+          ? { ...record, ...structuredClone(updates) } : record);
+        mockLibrary.revision += 1;
+      },
+    };
+
+    const mockHass = {
+      config: { version: '2026.10.3' },
+      connection: { connected: true },
+      user: { id: 'admin-user' },
+      states: {
+        'media_player.living_room_speaker': {
+          entity_id: 'media_player.living_room_speaker',
+          state: 'idle',
+          attributes: {
+            friendly_name: 'Living Room Speaker',
+            bluetooth_address: '11:22:33:44:55:66',
+            adapter: 'hci0',
+            queue: null,
+          }
+        },
+        'media_player.kitchen_speaker': {
+          entity_id: 'media_player.kitchen_speaker',
+          state: 'playing',
+          attributes: {
+            friendly_name: 'Kitchen Speaker',
+            bluetooth_address: 'aa:bb:cc:dd:ee:ff',
+            adapter: 'hci0',
+            queue: requestedScenario === 'queue' ? structuredClone(initialQueue) : null,
+          }
+        },
+        'media_player.disconnected_speaker': {
+          entity_id: 'media_player.disconnected_speaker',
+          state: 'off',
+          attributes: {
+            friendly_name: 'Disconnected Speaker',
+            bluetooth_address: '99:88:77:66:55:44',
+            adapter: 'hci0',
+            queue: null,
+          }
+        }
+      },
+      async callWS(message) {
+        mockCalls.push(structuredClone(message));
+        if (message.type === 'media_source/browse_media') {
+          maybeFail(message.type, false);
+          if (!message.media_content_id || message.media_content_id === 'media-source://') {
+            return mockRoot;
+          }
+          const item = findItem(mockRoot, message.media_content_id);
+          if (item) return item;
+          if (message.media_content_id.includes('/track/unavailable')) throw new Error('Media item not found');
+          if (message.media_content_id.startsWith('media-source://spotify/playlist/saved-')) {
+            return { title: 'Saved provider playlist', media_content_id: message.media_content_id, media_content_type: 'playlist', media_class: 'playlist', can_play: true, can_expand: false };
+          }
+          throw new Error('Media item not found');
+        }
+        if (message.type === 'media_source/search_media') {
+          return { result: [] };
+        }
+        if (message.type.startsWith('bl_haos/playlist_library/')) return handleLibraryCommand(message);
+        throw new Error('Unknown WS message: ' + message.type);
+      },
+      async callService(domain, service, data, target) {
+        playedCalls.push({ domain, service, data, target });
+        return { success: true };
+      }
+    };
+
+    function publishQueue(entityId, queue) {
+      const speaker = mockHass.states[entityId];
+      if (!speaker) throw new Error('Queue speaker is unavailable');
+      speaker.attributes.queue = queue ? structuredClone(queue) : null;
+      if (queue?.status === 'playing') speaker.state = 'playing';
+      else if (queue?.status === 'paused') speaker.state = 'paused';
+      else if (speaker.state !== 'off') speaker.state = 'idle';
+      const panel = document.getElementById('panel');
+      if (panel) panel.hass = mockHass;
+    }
+
+    const mockQueue = {
+      snapshot() {
+        return Object.fromEntries(Object.entries(mockHass.states).map(([entityId, state]) => [
+          entityId, structuredClone(state.attributes.queue),
+        ]));
+      },
+      resolvedTitles,
+      complete(entityId, successful) {
+        const current = mockHass.states[entityId]?.attributes.queue;
+        if (!current) return;
+        if (!successful) {
+          publishQueue(entityId, { ...current, status: 'failed', error: 'Playback failed' });
+          return;
+        }
+        const titles = queueItems[entityId] || [];
+        if (current.repeat === 'one') {
+          publishQueue(entityId, { ...current, status: 'playing', position: 0, error: null });
+        } else if (current.index < current.count || current.repeat === 'all') {
+          const index = current.index < current.count ? current.index + 1 : 1;
+          publishQueue(entityId, { ...current, title: titles[index - 1], index, position: 0, error: null });
+        } else {
+          publishQueue(entityId, { ...current, status: 'completed', error: null });
+        }
+      },
+      control(entityId, operation, value) {
+        const current = mockHass.states[entityId]?.attributes.queue;
+        if (!current) return;
+        if (operation === 'stop') {
+          publishQueue(entityId, null);
+          return;
+        }
+        if (operation === 'play' || operation === 'pause') {
+          publishQueue(entityId, {
+            ...current,
+            status: operation === 'play' ? 'playing' : 'paused',
+            error: operation === 'play' ? null : current.error,
+          });
+        } else if (operation === 'next') {
+          const titles = queueItems[entityId] || [];
+          if (current.index < current.count || current.repeat === 'all') {
+            const index = current.index < current.count ? current.index + 1 : 1;
+            publishQueue(entityId, { ...current, status: 'playing', title: titles[index - 1], index, position: 0, error: null });
+          }
+        } else if (operation === 'previous') {
+          const restart = current.index === 1 || current.position > 3;
+          const index = restart ? current.index : current.index - 1;
+          publishQueue(entityId, { ...current, status: 'playing', title: (queueItems[entityId] || [])[index - 1], index, position: 0 });
+        } else if (operation === 'set_shuffle') {
+          publishQueue(entityId, { ...current, shuffle: Boolean(value) });
+        } else if (operation === 'set_repeat') {
+          publishQueue(entityId, { ...current, repeat: value });
+        }
+      },
+      disconnect(entityId) {
+        const speaker = mockHass.states[entityId];
+        if (!speaker) return;
+        speaker.state = 'off';
+        publishQueue(entityId, null);
+      },
+    };
+
+    window.__mockHass = mockHass;
+    window.__playedCalls = playedCalls;
+    window.__mockLibrary = mockLibraryControls;
+    window.__mockQueue = mockQueue;
+
+    customElements.whenDefined('bl-haos-media-panel').then(() => {
+      const panel = document.getElementById('panel');
+      if (panel) {
+        panel.hass = mockHass;
+      }
+    });
+  </script>
+</body>
+</html>

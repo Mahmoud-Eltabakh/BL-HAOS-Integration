@@ -4,15 +4,20 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
+from copy import copy
 from datetime import datetime, timezone
+from typing import Any
+from urllib.parse import urlsplit
 
 import aiohttp
 from homeassistant.components.media_player import (
     BrowseMedia,
+    MediaClass,
     MediaPlayerDeviceClass,
     MediaPlayerEntity,
     MediaPlayerEntityFeature,
     MediaPlayerState,
+    RepeatMode,
     async_process_play_media_url,
 )
 from homeassistant.components.media_source import (
@@ -41,6 +46,11 @@ from .const import (
     MANUFACTURER,
     MEDIA_PLAYER_DOMAIN,
     MEDIA_TYPE_MAX_LENGTH,
+    MAX_QUEUE_ITEMS,
+    MAX_QUEUE_PAYLOAD_BYTES,
+    MAX_QUEUE_TEXT_LENGTH,
+    MAX_QUEUE_URL_LENGTH,
+    NATIVE_QUEUE_VERSION,
     NO_ACTIVE_PLAYBACK_MARKER,
     PAYLOAD_ADAPTER_KEY,
     PAYLOAD_ARTIST_KEY,
@@ -51,10 +61,17 @@ from .const import (
     PAYLOAD_PLAYBACK_KEY,
     PAYLOAD_POSITION_KEY,
     PAYLOAD_POSITION_UPDATED_AT_KEY,
+    PAYLOAD_QUEUE_KEY,
+    PAYLOAD_QUEUE_VERSION_KEY,
     PAYLOAD_STATE_KEY,
     PAYLOAD_TITLE_KEY,
     PAYLOAD_VOLUME_KEY,
     UNTRUSTED_SINK_MARKER,
+    QUEUE_NEXT,
+    QUEUE_PREVIOUS,
+    QUEUE_SET_REPEAT,
+    QUEUE_SET_SHUFFLE,
+    QUEUE_START,
     get_logger,
 )
 from .speaker_policy import ENTITY_DISABLED, ENTITY_REMOVED, desired_entity_state
@@ -68,6 +85,44 @@ _LOGGER = get_logger(__name__)
 # only informational for the bridge — ffmpeg sniffs the real stream — so pass it
 # through and drop anything that does not fit instead of failing playback.
 _MEDIA_TYPE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*(?:/[A-Za-z0-9!#$&^_.+-]+)?$")
+
+
+@trace_call
+def _queue_display_value(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    if not cleaned or "://" in cleaned or any(ord(character) < 32 or 127 <= ord(character) <= 159 for character in cleaned):
+        return None
+    return cleaned[:MAX_QUEUE_TEXT_LENGTH]
+
+
+@trace_call
+def _filter_audio_browse(item: BrowseMedia) -> BrowseMedia | None:
+    """Keep audio/playlist metadata and traversable provider hierarchy intact."""
+    audio_classes = {
+        MediaClass.ALBUM, MediaClass.ARTIST, MediaClass.COMPOSER,
+        MediaClass.CONTRIBUTING_ARTIST, MediaClass.GENRE, MediaClass.MUSIC,
+        MediaClass.PODCAST, MediaClass.TRACK,
+    }
+    supported = (
+        item.media_class == MediaClass.PLAYLIST
+        or item.media_content_type == "playlist"
+        or item.can_play and (
+            item.media_class in audio_classes
+            or item.media_content_type in audio_classes
+            or item.media_content_type.startswith("audio/")
+        )
+    )
+    if not item.can_expand and not supported:
+        return None
+    filtered = copy(item)
+    if item.children is not None:
+        filtered.children = [
+            child for original in item.children
+            if (child := _filter_audio_browse(original)) is not None
+        ]
+    return filtered
 
 
 @trace_call
@@ -247,6 +302,52 @@ class BLHAOSMediaPlayer(MediaPlayerEntity):
 
     @property
     @trace_call
+    def supported_features(self) -> MediaPlayerEntityFeature:
+        features = self._attr_supported_features
+        if self._queue_supported:
+            features |= (
+                MediaPlayerEntityFeature.NEXT_TRACK
+                | MediaPlayerEntityFeature.PREVIOUS_TRACK
+                | MediaPlayerEntityFeature.SHUFFLE_SET
+                | MediaPlayerEntityFeature.REPEAT_SET
+            )
+        return features
+
+    @property
+    @trace_call
+    def _queue_supported(self) -> bool:
+        version = self._speaker.get(PAYLOAD_QUEUE_VERSION_KEY)
+        return type(version) is int and version == NATIVE_QUEUE_VERSION
+
+    @property
+    @trace_call
+    def _queue(self) -> dict:
+        queue = self._playback.get(PAYLOAD_QUEUE_KEY)
+        return queue if self._queue_supported and isinstance(queue, dict) else {}
+
+    @property
+    @trace_call
+    def media_playlist(self) -> str | None:
+        playlist = self._queue.get("playlist")
+        return playlist if isinstance(playlist, str) else None
+
+    @property
+    @trace_call
+    def shuffle(self) -> bool | None:
+        value = self._queue.get("shuffle")
+        return value if isinstance(value, bool) else None
+
+    @property
+    @trace_call
+    def repeat(self) -> RepeatMode | None:
+        value = self._queue.get("repeat")
+        try:
+            return RepeatMode(value) if isinstance(value, str) else None
+        except ValueError:
+            return None
+
+    @property
+    @trace_call
     def name(self) -> str:
         return self._speaker.get(PAYLOAD_NAME_KEY, self._address)
 
@@ -327,9 +428,23 @@ class BLHAOSMediaPlayer(MediaPlayerEntity):
 
     @property
     @trace_call
-    def extra_state_attributes(self) -> dict[str, str]:
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Expose the physical Bluetooth address for diagnostics."""
-        return {"bluetooth_address": self._address, PAYLOAD_ADAPTER_KEY: self._speaker.get(PAYLOAD_ADAPTER_KEY, "")}
+        attributes = {
+            "bluetooth_address": self._address,
+            PAYLOAD_ADAPTER_KEY: self._speaker.get(PAYLOAD_ADAPTER_KEY, ""),
+        }
+        if self._queue:
+            attributes[PAYLOAD_QUEUE_KEY] = {
+                key: value
+                for key, value in self._queue.items()
+                if key in {
+                    "status", "playlist", "title", "artist", "index", "count",
+                    "shuffle", "repeat", "error", "position", "duration",
+                    "position_updated_at",
+                }
+            }
+        return attributes
 
     @trace_call
     async def async_added_to_hass(self) -> None:
@@ -353,7 +468,7 @@ class BLHAOSMediaPlayer(MediaPlayerEntity):
 
     @trace_call
     async def _async_command(self, operation: str, **kwargs) -> None:
-        _LOGGER.debug("Entity %s executing command: %s (kwargs: %s)", self.entity_id, operation, kwargs)
+        _LOGGER.debug("Entity %s executing command: %s", self.entity_id, operation)
         try:
             await self._client.async_command(self._address, operation, **kwargs)
             _LOGGER.debug("Entity %s command %s completed successfully", self.entity_id, operation)
@@ -375,6 +490,9 @@ class BLHAOSMediaPlayer(MediaPlayerEntity):
                 raise HomeAssistantError(
                     "Speaker disconnected while the command was in flight"
                 ) from error
+            if operation == COMMAND_PLAY_MEDIA:
+                _LOGGER.debug("Entity %s command play_media failed", self.entity_id)
+                raise HomeAssistantError("Failed to submit media to the speaker") from None
             _LOGGER.debug("Entity %s command %s failed: %s", self.entity_id, operation, error)
             raise HomeAssistantError(f"Failed to {operation}: {error}") from error
         except TimeoutError as error:
@@ -394,6 +512,112 @@ class BLHAOSMediaPlayer(MediaPlayerEntity):
         await self._async_command(COMMAND_STOP)
 
     @trace_call
+    async def async_media_next_track(self) -> None:
+        if not self._queue_supported:
+            raise HomeAssistantError("BL-HAOS queue controls are unsupported by this bridge")
+        await self._async_command(QUEUE_NEXT, queue_version=NATIVE_QUEUE_VERSION)
+
+    @trace_call
+    async def async_media_previous_track(self) -> None:
+        if not self._queue_supported:
+            raise HomeAssistantError("BL-HAOS queue controls are unsupported by this bridge")
+        await self._async_command(QUEUE_PREVIOUS, queue_version=NATIVE_QUEUE_VERSION)
+
+    @trace_call
+    async def async_set_shuffle(self, shuffle: bool) -> None:
+        if not self._queue_supported or not isinstance(shuffle, bool):
+            raise HomeAssistantError("BL-HAOS queue shuffle is unavailable")
+        await self._async_command(QUEUE_SET_SHUFFLE, queue_version=NATIVE_QUEUE_VERSION, shuffle=shuffle)
+
+    @trace_call
+    async def async_set_repeat(self, repeat: RepeatMode) -> None:
+        if not self._queue_supported:
+            raise HomeAssistantError("BL-HAOS queue repeat is unavailable")
+        repeat_value = getattr(repeat, "value", None)
+        if repeat_value not in {"off", "one", "all"}:
+            raise HomeAssistantError("BL-HAOS queue repeat mode is invalid")
+        await self._async_command(QUEUE_SET_REPEAT, queue_version=NATIVE_QUEUE_VERSION, repeat=repeat_value)
+
+    @trace_call
+    async def async_start_queue(self, record: dict) -> int:
+        """Resolve a complete saved record before replacing the bridge queue."""
+        if not self._queue_supported:
+            raise HomeAssistantError("Selected BL-HAOS speaker does not support queue playback")
+        if not self.entity_id or not self.available or not self._speaker.get(PAYLOAD_CONNECTED_KEY):
+            raise HomeAssistantError("Selected BL-HAOS speaker is unavailable")
+
+        if record.get("kind") == "custom":
+            entries = record.get("entries")
+        elif record.get("kind") == "provider":
+            entries = [{
+                "media_content_id": record.get("media_content_id"),
+                "title": record.get("title"),
+            }]
+        else:
+            entries = None
+        if not isinstance(entries, list) or not 1 <= len(entries) <= MAX_QUEUE_ITEMS:
+            raise HomeAssistantError("Playlist is empty or exceeds the supported item limit")
+
+        playlist = _queue_display_value(record.get("name")) or "Saved playlist"
+        resolved_items: list[dict[str, str]] = []
+        payload_bytes = len(playlist.encode("utf-8"))
+        for index, entry in enumerate(entries, start=1):
+            reference = entry.get("media_content_id") if isinstance(entry, dict) else None
+            try:
+                if not isinstance(reference, str) or not is_media_source_id(reference):
+                    raise ValueError("Invalid media reference")
+                resolved = await async_resolve_media(self.hass, reference, self.entity_id)
+                media_id = getattr(resolved, "url", None)
+                if not isinstance(media_id, str) or not media_id.strip():
+                    raise ValueError("Empty media resolution")
+                parsed = urlsplit(media_id)
+                absolute = parsed.scheme in {"http", "https"} and parsed.hostname
+                relative = not parsed.scheme and not parsed.netloc and media_id.startswith("/") and not media_id.startswith("//")
+                if not absolute and not relative:
+                    raise ValueError("Unsupported media resolution")
+                url = async_process_play_media_url(self.hass, media_id)
+                if url.startswith("/"):
+                    base_url = get_url(self.hass, prefer_external_url=False, allow_cloud=False)
+                    if not base_url:
+                        raise ValueError("Home Assistant playback URL is unavailable")
+                    url = f"{base_url}{url}"
+                parsed_url = urlsplit(url)
+                if (
+                    len(url) > MAX_QUEUE_URL_LENGTH
+                    or parsed_url.scheme not in {"http", "https"}
+                    or not parsed_url.hostname
+                ):
+                    raise ValueError("Resolved media URL is invalid")
+            except Exception:
+                raise HomeAssistantError(f"Could not resolve playlist item {index}") from None
+
+            item: dict[str, str] = {"url": url}
+            title = _queue_display_value(entry.get("title") or getattr(resolved, "title", None))
+            artist = _queue_display_value(getattr(resolved, "artist", None))
+            if title is not None:
+                item["title"] = title
+            if artist is not None:
+                item["artist"] = artist
+            payload_bytes += sum(len(value.encode("utf-8")) for value in item.values())
+            if payload_bytes > MAX_QUEUE_PAYLOAD_BYTES:
+                raise HomeAssistantError("Resolved playlist exceeds the supported payload limit")
+            resolved_items.append(item)
+
+        if not self._queue_supported or not self.available or not self._speaker.get(PAYLOAD_CONNECTED_KEY):
+            raise HomeAssistantError("Selected BL-HAOS speaker became unavailable")
+        try:
+            await self._client.async_command(
+                self._address,
+                QUEUE_START,
+                queue_version=NATIVE_QUEUE_VERSION,
+                playlist=playlist,
+                items=resolved_items,
+            )
+        except Exception:
+            raise HomeAssistantError("BL-HAOS could not start the saved playlist") from None
+        return len(resolved_items)
+
+    @trace_call
     async def async_set_volume_level(self, volume: float) -> None:
         await self._async_command(COMMAND_SET_VOLUME, volume=volume)
 
@@ -402,29 +626,46 @@ class BLHAOSMediaPlayer(MediaPlayerEntity):
         """Resolve Home Assistant sources to an add-on-reachable media URL."""
         if kwargs.get("enqueue"):
             raise HomeAssistantError("BL-HAOS does not support queued playback")
-        if is_media_source_id(media_id):
-            media = await async_resolve_media(self.hass, media_id, self.entity_id)
-            media_id = media.url
-            media_type = media.mime_type or media_type
-        url = async_process_play_media_url(self.hass, media_id)
-        if url.startswith("/"):
-            base_url = get_url(self.hass, prefer_external_url=False, allow_cloud=False)
-            if not base_url:
-                raise HomeAssistantError(
-                    "Home Assistant has no configured internal or external URL;"
-                    " set one under Settings > System > Network so local media"
-                    " can be resolved for the BL-HAOS add-on"
-                )
-            url = f"{base_url}{url}"
+        if not self.entity_id or not self.available or not self._speaker.get(PAYLOAD_CONNECTED_KEY):
+            raise HomeAssistantError("Selected BL-HAOS speaker is unavailable")
+        try:
+            source_reference = is_media_source_id(media_id)
+            if source_reference:
+                media = await async_resolve_media(self.hass, media_id, self.entity_id)
+                media_id = media.url
+                media_type = media.mime_type or media_type
+            if not isinstance(media_id, str) or not media_id.strip():
+                raise ValueError("Empty media resolution")
+            if source_reference:
+                parsed = urlsplit(media_id)
+                absolute = parsed.scheme in {"http", "https"} and parsed.hostname
+                relative = not parsed.scheme and not parsed.netloc and media_id.startswith("/") and not media_id.startswith("//")
+                if not absolute and not relative:
+                    raise ValueError("Unsupported media resolution")
+            url = async_process_play_media_url(self.hass, media_id)
+            if url.startswith("/"):
+                base_url = get_url(self.hass, prefer_external_url=False, allow_cloud=False)
+                if not base_url:
+                    raise HomeAssistantError("Home Assistant has no configured playback URL")
+                url = f"{base_url}{url}"
+        except Exception:
+            raise HomeAssistantError(
+                "Home Assistant could not resolve this media item; check provider access and availability"
+            ) from None
+        if not self.available or not self._speaker.get(PAYLOAD_CONNECTED_KEY):
+            raise HomeAssistantError("Selected BL-HAOS speaker is unavailable")
         media_type = _normalize_media_type(media_type)
         _LOGGER.debug(
-            "Entity %s resolving play_media: original_type=%s -> final_type=%s, url=%s",
+            "Entity %s resolving play_media: media_type=%s",
             self.entity_id,
-            kwargs.get("media_type"),
-            media_type,
-            url,
+            {"music": "audio", "audio/mpeg": "audio", "audio/flac": "audio", "audio/wav": "audio", "audio/ogg": "audio", "audio/mp4": "audio", "playlist": "playlist"}.get(media_type, "other"),
         )
-        await self._async_command(COMMAND_PLAY_MEDIA, url=url, media_type=media_type)
+        try:
+            await self._async_command(COMMAND_PLAY_MEDIA, url=url, media_type=media_type)
+        except Exception:
+            raise HomeAssistantError(
+                "BL-HAOS could not submit this media item; check the speaker connection and provider access"
+            ) from None
 
     @trace_call
     async def async_browse_media(
@@ -437,4 +678,7 @@ class BLHAOSMediaPlayer(MediaPlayerEntity):
             media_content_type,
             media_content_id,
         )
-        return await async_browse_media(self.hass, media_content_id)
+        result = _filter_audio_browse(await async_browse_media(self.hass, media_content_id))
+        if result is None:
+            raise HomeAssistantError("This media item is not supported for audio playback")
+        return result

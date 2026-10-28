@@ -12,7 +12,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import aiohttp
 import pytest
@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from custom_components.bl_haos.client import BLHAOSClient  # noqa: E402
 from custom_components.bl_haos.const import CONNECTION_DROPPED_MARKER  # noqa: E402
-from tests.conftest import FakeSession, load_snapshot  # noqa: E402
+from tests.conftest import FakeResponse, FakeSession, load_snapshot  # noqa: E402
 
 ENDPOINT = "http://bl-haos:8099"
 TOKEN = "unit-test-token"
@@ -69,6 +69,49 @@ async def test_command_payload_shape_and_cache_update():
     assert payload["url"] == "https://example.test/a.mp3"
     assert payload["media_type"] == "audio/mpeg"
     assert "aa:bb:cc:dd:ee:01" in client.speakers
+
+
+@pytest.mark.parametrize("failure,second_succeeds", [
+    (aiohttp.ServerDisconnectedError, True),
+    (aiohttp.ServerDisconnectedError, False),
+    (TimeoutError, True),
+    (aiohttp.ClientError, True),
+])
+async def test_play_media_does_not_repeat_ambiguous_http_submission(failure, second_succeeds):
+    snapshot = load_snapshot("speakers_initial.json")
+    session = FakeSession(snapshot)
+    client, _ = _client(session)
+    session.command_response = snapshot["speakers"]["aa:bb:cc:dd:ee:01"]
+    served_post = session.post
+    applied = []
+
+    class AppliedWithoutAcknowledgement(FakeResponse):
+        async def __aenter__(self):
+            applied.append("play_media")
+            raise failure("https://user:password@private.example.test/?token=credential")
+
+    def ambiguous_post(url, **kwargs):
+        response = served_post(url, **kwargs)
+        if len(session.commands) == 1 or not second_succeeds:
+            return AppliedWithoutAcknowledgement({})
+        return response
+
+    with (
+        patch.object(session, "post", side_effect=ambiguous_post),
+        patch("custom_components.bl_haos.client.asyncio.sleep", new=AsyncMock()) as sleep,
+        pytest.raises((aiohttp.ClientError, TimeoutError)),
+    ):
+        await client.async_command(
+            "AA-BB-CC-DD-EE-01", "play_media",
+            url="https://stream.example.test/audio", media_type="audio/mpeg",
+        )
+
+    assert session.commands == [(COMMAND_URL, {
+        "version": 1, "operation": "play_media",
+        "url": "https://stream.example.test/audio", "media_type": "audio/mpeg",
+    })]
+    assert applied == ["play_media"]
+    sleep.assert_not_awaited()
 
 
 async def test_command_error_detail_is_surfaced():
@@ -211,13 +254,8 @@ async def test_listener_keeps_accepted_live_event():
     assert "aa:bb:cc:dd:ee:01" in client.speakers
 
 
-async def test_command_retries_once_when_the_bridge_closes_the_connection():
-    """A pooled socket the add-on closed must not fail the user's action.
-
-    The daemon drops idle keep-alive connections; a command written to one of
-    those sockets raised ServerDisconnectedError, which surfaced in Home
-    Assistant as "Failed to play_media: Server disconnected".
-    """
+async def test_state_command_retries_once_when_the_bridge_closes_the_connection():
+    """Preserve the existing retry policy for state commands, not playback."""
     snapshot = load_snapshot("speakers_initial.json")
     session = FakeSession(snapshot)
     client, _ = _client(session)
@@ -233,10 +271,12 @@ async def test_command_retries_once_when_the_bridge_closes_the_connection():
 
     session.post = drop_first_connection  # type: ignore[assignment]
 
-    record = await client.async_command("aa:bb:cc:dd:ee:01", "play_media", url="https://example.test/a.mp3")
+    with patch("custom_components.bl_haos.client.asyncio.sleep", new=AsyncMock()) as sleep:
+        record = await client.async_command("aa:bb:cc:dd:ee:01", "pause")
 
     assert attempts["count"] == 2, "a dropped connection must be retried once"
     assert len(session.commands) == 1, "only the served attempt reaches the bridge"
+    sleep.assert_awaited_once()
     assert record["address"] == "aa:bb:cc:dd:ee:01"
 
 

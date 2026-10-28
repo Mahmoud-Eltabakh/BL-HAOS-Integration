@@ -4,6 +4,89 @@ This HACS custom integration exposes trusted BL-HAOS Bluetooth speakers as nativ
 
 Each speaker entity supports Home Assistant's media browser (`BROWSE_MEDIA`), so you can browse local media folders and other configured media sources directly from the Home Assistant UI instead of only playing media by URL.
 
+Native Browse Media retains audio items and provider playlists using Home
+Assistant's media metadata, not provider names or identifier shapes. Expandable
+folders remain traversable, including unknown providers; unsupported playable
+leaves are excluded without flattening the hierarchy or changing supplied
+titles, artwork, identifiers, or play/expand/search capabilities. Provider
+shortcuts remain one atomic queue item; their internal tracks are not expanded.
+Home Assistant resolves every saved reference in order before submitting one
+queue start to the selected connected speaker. Resolution and queue failures
+produce bounded errors without URL/credential details, fallback, or target
+substitution. Queue start, Next, and Previous are not automatically retried.
+
+## Media Catalog Panel
+
+### Phase 24 Local Workflow and Limits
+
+The production panel and integrated bridge 0.2.69 remain undeployed; local
+Core 2026.10.3 tests are not live-provider, expiry or physical-playback proof.
+After separately authorized installation, use **Native Browse Media** on the
+speaker or **Open Media Catalog** beside Home Assistant Native integration in
+Ingress. In **Play on**, select exactly one connected BL-HAOS speaker, browse
+the provider hierarchy and press **Play** for an audio item or provider playlist.
+The original opaque reference goes unchanged to native `media_player.play_media`;
+HA owns provider authentication and reference resolution. A playlist stays one
+reference, not a local queue. Only explicit same-item/same-target retry is
+offered after failure, never automatic retry, fallback, skip or target substitution.
+Search appears only when HA advertises it.
+
+The panel does not store browser/add-on HA/provider credentials, proxy a bridge
+catalog, contact providers directly, or accept raw URL input. Existing native
+direct-URL support is separate, not a catalog fallback. Public provider layout
+and actual expiry remain unverified.
+
+### Phase 25 Local Candidate
+
+The local Phase 25 candidate uses the authenticated panel and Home Assistant-owned
+storage for custom playlists of ordered Home Assistant media references and
+one-reference provider-playlist shortcuts; provider tracks are not copied.
+Availability checks are explicit HA media-source browse requests for the exact
+saved reference only; they do not resolve or play media and never rewrite saved
+IDs.
+
+### Phase 26 Local Queue Candidate
+
+The local Phase 26 candidate resolves every saved reference in Home Assistant
+before one queue start. The bridge owns one in-memory queue per speaker; the
+Library panel, Ingress SpeakerCard, and native entity consume the bridge's
+authoritative snapshot. Native queue controls require bridge queue version 1.
+Resolved playback URLs are transient between Home Assistant and the bridge and
+are never sent to the browser or stored in the playlist library. Failed items
+remain current until an explicit Play retry or Next skip; the integration does
+not automatically retry queue start, Next, or Previous. Queues do not resume
+after an add-on restart.
+
+Local SIL and mock evidence do not establish live provider or audible playback
+acceptance. Phase 24 production requirements remain pending, T-24-15 remains
+OPEN/HIGH, and T-24-16 remains OPEN/MEDIUM. Release and deployment are not
+approved. Follow root TESTING.md for separately authorized HAOS acceptance.
+
+Successful integration setup registers **BL-HAOS Media** at `/bl-haos-media`.
+The packaged `panel_static/bl-haos-media-panel.js` module is served at
+`/api/bl_haos/catalog/bl-haos-media-panel.js`. Select one connected speaker in
+**Play on** before playing a media-source item. The panel uses only Home
+Assistant's injected `hass` browse and service APIs; provider authentication and
+media resolution remain in Home Assistant. It does not copy tokens, persist
+browser credentials, or contact the Bridge catalog or providers directly.
+
+Config entries share serialized ownership of one panel and one temporary served
+copy of the packaged module. Unloading one entry keeps the panel available to
+other entries. Final unload or failed first-owner setup removes the panel through
+the public frontend API and deletes the temporary copy, making the module URL
+return HTTP 404. Core 2026.10.3 has no public static-path unregister API: its inert
+route remains until Core exits, and later setup recreates the same file and
+reuses that route. This is serving disablement, not full route unregistration.
+An indeterminate static-registration failure stays fail-closed for the current
+Core lifetime rather than attempting duplicate registration; setup then reports
+that a Core restart is required. No restart is performed automatically.
+
+The separate `panel_ui` source package builds the fixed module using `npm ci`
+and `npm run build` from that directory. Its lockfile and exact dependency pins
+are independent of the add-on web UI. The local catalog is covered by Core
+2026.10.3 SIL and injected-hass browser tests; production provider playback and
+HA-shell acceptance still require the phase 24 target-host checks.
+
 ## Install
 
 1. In HACS, add `https://github.com/Mahmoud-Eltabakh/BL-HAOS-Integration` as a custom **Integration** repository and install **BL-HAOS Bluetooth Audio**.
@@ -68,7 +151,11 @@ and long-running listeners complete their span only when they stop.
 Export Home Assistant Core logs alongside the add-on logs to correlate command
 times with BlueZ/audio behavior. Restore `info` after reproducing the issue:
 DEBUG traces can be large and add overhead. Existing operational messages
-may still contain identifiers or media URLs, so redact logs before sharing.
+still contain device identifiers, so review logs before sharing. Playback
+submission logs omit the resolved URL, command options, and raw transport
+failure detail; they retain operation, entity, and normalized media type.
+The validated URL remains an internal command value required for decoding,
+not diagnostic output. This is not a global sanitizer for third-party logs.
 
 ## HACS Publishing
 

@@ -1,0 +1,33 @@
+{
+  "name": "bl-haos-media-panel",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc && vite build",
+    "test": "vitest run",
+    "test:host-config": "node --test e2e/host-env.test.mjs",
+    "test:host": "playwright test --config e2e/playwright.config.ts",
+    "test:mock-panel": "playwright test --config playwright.mock.config.ts",
+    "typecheck:host": "tsc --noEmit --strict --skipLibCheck --target ES2022 --module ESNext --moduleResolution bundler --allowJs e2e/playwright.config.ts e2e/catalog.spec.ts",
+    "dev": "vite --host 127.0.0.1"
+  },
+  "dependencies": {
+    "lucide-react": "0.344.0",
+    "react": "18.2.0",
+    "react-dom": "18.2.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "16.3.3",
+    "@testing-library/user-event": "14.6.7",
+    "@types/react": "18.2.66",
+    "@types/react-dom": "18.2.22",
+    "@vitejs/plugin-react": "4.7.0",
+    "jsdom": "25.0.1",
+    "typescript": "5.2.2",
+    "vite": "7.3.7",
+    "vitest": "5.0.4"
+  }
+}
