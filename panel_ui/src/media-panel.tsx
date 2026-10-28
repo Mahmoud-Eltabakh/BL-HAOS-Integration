@@ -235,6 +235,7 @@ export function MediaPanel({ hass, initialView = 'library' }: { hass?: Hass; ini
   const sessionGeneration = useRef(0);
   const draftRecordId = useRef('');
   const entryKeyCounter = useRef(0);
+  const navigateAfterDiscard = useRef(false);
   const providerSaveInFlight = useRef(new Set<string>());
   const availabilityInFlight = useRef(new Set<string>());
   const playRequest = useRef(0);
@@ -411,6 +412,12 @@ export function MediaPanel({ hass, initialView = 'library' }: { hass?: Hass; ini
       else dialog.removeAttribute('open');
     }
   }, [confirmDelete, confirmProviderRemove, confirmDiscard, confirmQueueLaunch]);
+
+  useLayoutEffect(() => {
+    if (!navigateAfterDiscard.current || confirmDiscard || creating || editingRecord) return;
+    navigateAfterDiscard.current = false;
+    if (dialogTrigger.current?.isConnected) dialogTrigger.current.click();
+  }, [confirmDiscard, creating, editingRecord]);
 
   useLayoutEffect(() => {
     if (confirmQueueLaunch) keepCurrentQueueButton.current?.focus();
@@ -1334,7 +1341,7 @@ export function MediaPanel({ hass, initialView = 'library' }: { hass?: Hass; ini
           closeAfterDiscard.current = false;
           setConfirmDiscard(false);
           finishEditing();
-          if (closePanel) window.location.assign('/');
+          navigateAfterDiscard.current = closePanel;
         }}>Discard changes</button>
       </div>
     </dialog>}

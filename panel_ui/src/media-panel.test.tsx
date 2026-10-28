@@ -237,6 +237,23 @@ describe('injected Home Assistant tracer', () => {
     expect(screen.getByRole('button', { name: 'Open Provider' })).toHaveFocus();
   });
 
+  it('navigates through the Close link only after confirming discard', async () => {
+    const hass = injectedHass();
+    renderRTL(<MediaPanel hass={hass} initialView="library" />);
+    await screen.findByRole('heading', { name: 'Your playlists' });
+    fireEvent.click(screen.getByRole('button', { name: 'Create playlist' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Playlist name' }), { target: { value: 'Unsaved draft' } });
+
+    const closeLink = screen.getByRole('link', { name: 'Close catalog' });
+    const navigate = vi.spyOn(closeLink, 'click').mockImplementation(() => {});
+    fireEvent.click(closeLink);
+    const dialog = screen.getByRole('dialog', { name: 'Discard changes' });
+    expect(navigate).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Discard changes' }));
+
+    await waitFor(() => expect(navigate).toHaveBeenCalledTimes(1));
+  });
+
   it('keeps unavailable target and item labels and disables manual retry without substitution', async () => {
     const hass = injectedHass();
     vi.mocked(hass.callService).mockRejectedValue(new Error('private'));

@@ -18,7 +18,7 @@ from custom_components.bl_haos.const import CONF_ENDPOINT, CONF_LOG_LEVEL, CONF_
 from custom_components.bl_haos.client import BLHAOSClient
 from custom_components.bl_haos.diagnostics import async_get_config_entry_diagnostics
 
-from conftest import FakeResponse, FakeSession, FakeWebSocket, load_snapshot
+from tests.conftest import FakeResponse, FakeSession, FakeWebSocket, load_snapshot
 
 pytestmark = pytest.mark.usefixtures("enable_custom_integrations")
 

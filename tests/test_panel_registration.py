@@ -78,7 +78,10 @@ async def assert_module_status(http, status):
     response = await http.get(PANEL_URL)
     assert response.status == status
     if status == 200:
-        assert "bl-haos-media-panel" in await response.text()
+        body = await response.text()
+        assert "bl-haos-media-panel" in body
+        assert "Play playlist" in body
+        assert "Playback queue" in body
         assert "max-age=2678400" not in response.headers.get("Cache-Control", "")
 
 

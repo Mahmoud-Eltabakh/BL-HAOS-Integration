@@ -34,7 +34,7 @@ from custom_components.bl_haos.playlist_library import (
     PlaylistLibraryValidationError,
     async_setup as async_setup_playlist_library,
 )
-from conftest import FakeSession, load_snapshot
+from tests.conftest import FakeSession, load_snapshot
 
 pytestmark = pytest.mark.usefixtures("enable_custom_integrations")
 

@@ -1,8 +1,13 @@
 """Static package checks that do not require a Home Assistant runtime."""
 
+import filecmp
 import json
 import re
+import shutil
+import subprocess
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).parents[1]
 COMPONENT = ROOT / "custom_components" / "bl_haos"
@@ -106,6 +111,85 @@ def test_test_strategy_artifacts_are_checked_in():
     assert (repo / "modules" / "bridge" / "web_ui" / "e2e" / "playwright.config.ts").is_file()
 
 
+def test_root_ci_requires_panel_parity_without_publication():
+    repo = ROOT.parents[1]
+    workflow = (repo / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
+    integration_job = workflow.split("  integration-unit:", 1)[1].split("\n  integration-sil:", 1)[0]
+    trigger_section = workflow.split("\non:\n", 1)[1].split("\npermissions:\n", 1)[0]
+    permission_section = workflow.split("\npermissions:\n", 1)[1].split("\njobs:\n", 1)[0]
+    jobs_section = workflow.split("\njobs:\n", 1)[1]
+    job_parts = re.split(r"(?m)^  ([A-Za-z0-9_-]+):\s*$", jobs_section)
+    jobs = {job_parts[index]: job_parts[index + 1] for index in range(1, len(job_parts), 2)}
+
+    assert set(re.findall(r"(?m)^  ([a-z_]+):\s*$", trigger_section)) == {"push", "pull_request", "workflow_dispatch"}
+    assert permission_section.strip() == "contents: read"
+    assert workflow.count("permissions:") == 1
+    assert set(jobs) == {"repo-hygiene", "bridge-unit", "integration-unit", "integration-sil", "frontend"}
+    for job_name, job_body in jobs.items():
+        assert re.search(r"(?m)^    runs-on: ubuntu-latest\s*$", job_body), f"{job_name} must use its own hosted runner"
+    checkout_steps = re.split(r"(?m)^      - uses: actions/checkout@v5\s*$", workflow)[1:]
+    assert len(checkout_steps) == 5
+    for checkout_step in checkout_steps:
+        checkout_step = checkout_step.split("\n      - ", 1)[0]
+        assert re.search(r"(?m)^\s+persist-credentials:\s*false\s*$", checkout_step)
+    assert not re.search(r"(?m)^\s{4}needs\s*:", jobs_section)
+    assert not re.search(r"(?m)^\s{4}outputs\s*:", jobs_section)
+    assert "actions/cache@" not in workflow
+    assert "upload-artifact" not in workflow
+    assert "download-artifact" not in workflow
+    assert "${{" not in workflow
+    node_step = integration_job.split("uses: actions/setup-node@v5", 1)[1].split("\n      - ", 1)[0]
+    assert not re.search(r"(?m)^\s+cache:", node_step)
+    assert 'node-version: "22"' in integration_job
+    assert "npm ci --prefix panel_ui --ignore-scripts" in integration_job
+    assert "node --version" in integration_job
+    assert "npm --version" in integration_job
+    assert "panel_ui/node_modules/vite/package.json" in integration_job
+    assert "panel_ui/node_modules/typescript/package.json" in integration_job
+    setup_node_position = integration_job.index("uses: actions/setup-node@v5")
+    install_position = integration_job.index("npm ci --prefix panel_ui --ignore-scripts")
+    preflight_position = integration_job.index("name: Require panel parity toolchain")
+    pytest_position = integration_job.index("name: Run client unit tests")
+    assert setup_node_position < install_position < preflight_position < pytest_position
+    for secret_marker in ("${{ secrets.", "${{ github.token", "GITHUB_TOKEN", "GH_TOKEN", "GHCR_TOKEN"):
+        assert secret_marker not in workflow
+    for publisher_marker in (
+        "packages: write",
+        "write-all",
+        "docker/",
+        "docker ",
+        "ghcr.io",
+        "publisher",
+        "publish",
+        "registry login",
+        "release upload",
+        "npm publish",
+        "build-and-push.ps1",
+        "watch-and-build.ps1",
+        "workflow_call",
+        "workflow_run",
+        "gh api",
+        "gh release",
+        "gh workflow",
+        "git push",
+        "curl ",
+        "wget ",
+        "twine upload",
+        "helm push",
+        "oras push",
+        "skopeo copy",
+    ):
+        assert publisher_marker not in workflow
+    assert not re.search(r"(?im)^\s*(?:gh|docker|podman|buildah|curl|wget|aws|az|gcloud|oras|skopeo)\s", workflow)
+    allowed_actions = {
+        "actions/checkout@v5",
+        "actions/setup-python@v6",
+        "actions/setup-node@v5",
+    }
+    for action in re.findall(r"(?m)^\s*-\s*uses:\s*(\S+)", workflow):
+        assert action in allowed_actions, f"unexpected root workflow action: {action}"
+
+
 def test_unit_stubs_enable_windows_client_tests():
     stub_dir = Path(__file__).parent / "ha_stubs" / "homeassistant"
     for stub in ("core.py", "config_entries.py", "exceptions.py"):
@@ -126,6 +210,43 @@ def test_panel_build_source_and_stable_bundle_contract():
     compiled = bundle.read_text(encoding="utf-8")
     assert "bl-haos-media-panel" in compiled
     assert "--neu-page" in compiled
+    assert "Play playlist" in compiled
+    assert "Playback queue" in compiled
     source = (panel / "src" / "media-panel.tsx").read_text(encoding="utf-8")
     for forbidden in ("localStorage", "sessionStorage", "resolve_media", "apiClient", "window.", "parent.", "fetch(", "Authorization", "Bearer "):
         assert forbidden not in source
+
+
+def test_panel_bundle_matches_fresh_build(tmp_path):
+    panel = ROOT / "panel_ui"
+    bundle = COMPONENT / "panel_static" / "bl-haos-media-panel.js"
+    packaged_bytes_before = bundle.read_bytes()
+    node = shutil.which("node.exe") or shutil.which("node")
+    npm = shutil.which("npm.cmd") or shutil.which("npm")
+    vite_package = panel / "node_modules" / "vite" / "package.json"
+    typescript_package = panel / "node_modules" / "typescript" / "package.json"
+    if node is None or npm is None or not vite_package.is_file() or not typescript_package.is_file():
+        pytest.skip("Node.js, npm, Vite, and TypeScript are required for the local bundle parity check")
+
+    build_dir = tmp_path / "panel-build"
+    subprocess.run(
+        [
+            npm,
+            "--prefix",
+            str(panel),
+            "run",
+            "build",
+            "--",
+            "--outDir",
+            str(build_dir),
+        ],
+        cwd=ROOT,
+        check=True,
+    )
+    assert {path.name for path in build_dir.iterdir()} == {bundle.name}
+    fresh_bundle = build_dir / bundle.name
+    fresh_compiled = fresh_bundle.read_text(encoding="utf-8")
+    assert "Play playlist" in fresh_compiled
+    assert "Playback queue" in fresh_compiled
+    assert filecmp.cmp(fresh_bundle, bundle, shallow=False), "tracked panel bundle differs from a fresh Vite build"
+    assert bundle.read_bytes() == packaged_bytes_before, "isolated parity build modified the tracked package bundle"

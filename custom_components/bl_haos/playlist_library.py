@@ -11,7 +11,6 @@ from typing import Any
 from urllib.parse import unquote_plus
 from uuid import UUID, uuid4
 
-import probatio
 import voluptuous as vol
 
 from .const import DOMAIN, MEDIA_PLAYER_DOMAIN
@@ -676,17 +675,17 @@ _DELETE_CUSTOM_SCHEMA = {
     vol.Required("record_id"): str,
     vol.Required("revision"): vol.All(int, vol.Range(min=0)),
 }
-_SAVE_PROVIDER_SCHEMA = probatio.All(
-    probatio.Schema(
+_SAVE_PROVIDER_SCHEMA = vol.All(
+    vol.Schema(
         {
-            probatio.Required("type"): "bl_haos/playlist_library/save_provider",
-            probatio.Required("media_content_id"): str,
-            probatio.Required("name"): str,
-            probatio.Optional("title"): str,
-            probatio.Optional("media_class"): str,
-            probatio.Optional("media_content_type"): str,
+            vol.Required("type"): "bl_haos/playlist_library/save_provider",
+            vol.Required("media_content_id"): str,
+            vol.Required("name"): str,
+            vol.Optional("title"): str,
+            vol.Optional("media_class"): str,
+            vol.Optional("media_content_type"): str,
         },
-        extra=probatio.ALLOW_EXTRA,
+        extra=vol.ALLOW_EXTRA,
     )
 )
 _RENAME_PROVIDER_SCHEMA = {
