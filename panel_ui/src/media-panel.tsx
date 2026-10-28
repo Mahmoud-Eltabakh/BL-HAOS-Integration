@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { ArrowDown, ArrowLeft, ArrowUp, ChevronRight, Music2, Play, Search, X } from 'lucide-react';
 import { SpeakerManagement } from './speaker-management';
@@ -88,6 +88,7 @@ export interface Hass {
   connection: { connected: boolean };
   user: { id: string };
   states: Record<string, EntityState>;
+  fetchWithAuth?(path: string, init?: RequestInit): Promise<Response>;
   callWS(message:
     | { type: 'media_source/browse_media'; media_content_id?: string }
     | { type: 'media_source/search_media'; media_content_id: string; search_query: string }
@@ -153,6 +154,61 @@ function thumbnailPath(candidate?: string | null): string | undefined {
   } catch {
     return;
   }
+}
+
+function MediaThumbnail({ hass, thumbnail }: { hass?: Hass; thumbnail?: string | null }) {
+  const path = thumbnailPath(thumbnail);
+  const connection = hass?.connection;
+  const connected = connection?.connected;
+  const userId = hass?.user.id;
+  const fetchWithAuth = hass?.fetchWithAuth;
+  const [result, setResult] = useState<{
+    path: string;
+    connection: Hass['connection'];
+    userId: string;
+    fetchWithAuth: Hass['fetchWithAuth'];
+    url?: string;
+    failed: boolean;
+  }>();
+
+  useEffect(() => {
+    if (!path || !connection || !connected || !userId || !fetchWithAuth) return;
+    const controller = new AbortController();
+    let active = true;
+    let objectUrl: string | undefined;
+    const owner = { path, connection, userId, fetchWithAuth };
+    void (async () => {
+      try {
+        const response = await fetchWithAuth(path, { signal: controller.signal, redirect: 'error' });
+        if (!response.ok) throw new Error('Artwork request failed');
+        const blob = await response.blob();
+        if (!blob.type.startsWith('image/') || !blob.size) throw new Error('Invalid artwork response');
+        if (!active) return;
+        objectUrl = URL.createObjectURL(blob);
+        setResult({ ...owner, url: objectUrl, failed: false });
+      } catch {
+        if (active && !controller.signal.aborted) setResult({ ...owner, failed: true });
+      }
+    })();
+    return () => {
+      active = false;
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [path, connection, connected, userId, fetchWithAuth]);
+
+  const current = connected && result?.path === path && result?.connection === connection
+    && result?.userId === userId && result?.fetchWithAuth === fetchWithAuth ? result : undefined;
+  if (current?.url && !current.failed) {
+    return <img className="thumbnail" src={current.url} alt="" loading="lazy" referrerPolicy="no-referrer"
+      onError={() => setResult({ ...current, failed: true })} />;
+  }
+  if (path && (!fetchWithAuth || current?.failed)) {
+    return <span className="media-icon" role="img" aria-label="Artwork unavailable" title="Artwork unavailable">
+      <Music2 size={24} aria-hidden="true" />
+    </span>;
+  }
+  return <Music2 className="media-icon" size={24} aria-hidden="true" />;
 }
 
 const accessError = 'Your Home Assistant session cannot access this media source. Reconnect or ask an administrator for access, then try again.';
@@ -1264,9 +1320,7 @@ export function MediaPanel({ hass, initialView = 'library' }: { hass?: Hass; ini
             <p>Home Assistant did not return a playable audio source. Check the media provider and try again.</p></div>)}
         <ul aria-label="Catalog items">
           {(catalog?.children ?? []).map((item) => <li key={item.media_content_id} aria-current={selectedItem?.media_content_id === item.media_content_id ? 'true' : undefined}>
-            {thumbnailPath(item.thumbnail)
-              ? <img className="thumbnail" src={thumbnailPath(item.thumbnail)} alt="" loading="lazy" referrerPolicy="no-referrer" />
-              : <Music2 className="media-icon" size={24} aria-hidden="true" />}
+            <MediaThumbnail hass={hass} thumbnail={item.thumbnail} />
             <div className="media-detail"><span className="media-title" title={item.title}>{item.title}</span>
               <span className="metadata" title={item.media_content_type}>{item.media_class ?? item.media_content_type}</span>
               {!item.can_play && !item.can_expand && <span className="metadata">{unsupported}</span>}</div>

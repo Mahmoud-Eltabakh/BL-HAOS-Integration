@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render as renderRTL, screen, waitFor, within }
 import '@testing-library/jest-dom/vitest';
 import userEvent from '@testing-library/user-event';
 import { cloneElement, type ReactElement } from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MediaPanel, type BrowseMedia, type Hass, type MediaPanelElement } from './media-panel';
 
 type PanelProps = { hass?: Hass; initialView?: 'library' | 'browse' };
@@ -46,6 +46,7 @@ function injectedHass(): Hass {
     callWS: vi.fn<Hass['callWS']>(async (message) => message.type === 'bl_haos/playlist_library/list'
       ? { revision: 0, records: [] } : root),
     callService: vi.fn(async () => undefined),
+    fetchWithAuth: vi.fn(async () => new Response('artwork', { headers: { 'Content-Type': 'image/png' } })),
   };
 }
 
@@ -55,6 +56,13 @@ function deferred<Result>() {
   const promise = new Promise<Result>((accept, decline) => { resolve = accept; reject = decline; });
   return { promise, resolve, reject };
 }
+
+beforeEach(() => {
+  vi.stubGlobal('URL', class extends URL {
+    static createObjectURL = vi.fn(() => 'blob:ha-artwork');
+    static revokeObjectURL = vi.fn();
+  });
+});
 
 afterEach(() => {
   cleanup();
@@ -575,14 +583,81 @@ describe('injected Home Assistant tracer', () => {
     const view = render(<MediaPanel hass={hass} />);
     await screen.findByText(item.title);
     expect(view.container.querySelector('img')).toBeNull();
+    expect(hass.fetchWithAuth).not.toHaveBeenCalled();
   });
 
-  it('preserves HA thumbnail paths without copying session authentication', async () => {
+  it('loads the original HA thumbnail path through HA authentication without copying credentials into image URLs', async () => {
     const hass = injectedHass();
     const view = render(<MediaPanel hass={hass} />);
     await screen.findByText(item.title);
-    expect(view.container.querySelector('img')).toHaveAttribute('src', item.thumbnail);
+    await waitFor(() => expect(view.container.querySelector('img')).toHaveAttribute('src', 'blob:ha-artwork'));
     expect(view.container.querySelector('img')).toHaveAttribute('referrerpolicy', 'no-referrer');
+    expect(hass.fetchWithAuth).toHaveBeenCalledExactlyOnceWith(item.thumbnail, {
+      signal: expect.any(AbortSignal), redirect: 'error',
+    });
+  });
+
+  it.each([401, 403, 404])('reports artwork HTTP %i without a broken image, unauthenticated fallback or retry', async (status) => {
+    const hass = injectedHass();
+    vi.mocked(hass.fetchWithAuth!).mockResolvedValue(new Response(null, { status }));
+    const view = render(<MediaPanel hass={hass} />);
+    expect(await screen.findByRole('img', { name: 'Artwork unavailable' })).toBeVisible();
+    expect(view.container.querySelector('img')).toBeNull();
+    expect(hass.fetchWithAuth).toHaveBeenCalledTimes(1);
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+  });
+
+  it('reports network errors and non-image responses as unavailable artwork', async () => {
+    const hass = injectedHass();
+    vi.mocked(hass.fetchWithAuth!).mockRejectedValue(new TypeError('Network failure'));
+    const view = render(<MediaPanel hass={hass} />);
+    expect(await screen.findByRole('img', { name: 'Artwork unavailable' })).toBeVisible();
+    view.unmount();
+    vi.mocked(hass.fetchWithAuth!).mockResolvedValue(new Response('<html>login</html>', {
+      headers: { 'Content-Type': 'text/html' },
+    }));
+    render(<MediaPanel hass={hass} />);
+    expect(await screen.findByRole('img', { name: 'Artwork unavailable' })).toBeVisible();
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+  });
+
+  it('reports image decoding failures and releases the blob URL on unmount', async () => {
+    const hass = injectedHass();
+    const view = render(<MediaPanel hass={hass} />);
+    await waitFor(() => expect(view.container.querySelector('img')).toHaveAttribute('src', 'blob:ha-artwork'));
+    fireEvent.error(view.container.querySelector('img')!);
+    expect(screen.getByRole('img', { name: 'Artwork unavailable' })).toBeVisible();
+    const signal = vi.mocked(hass.fetchWithAuth!).mock.calls[0][1]!.signal!;
+    view.unmount();
+    expect(signal.aborted).toBe(true);
+    expect(URL.revokeObjectURL).toHaveBeenCalledExactlyOnceWith('blob:ha-artwork');
+  });
+
+  it('discards artwork from a replaced session and releases current artwork on disconnect', async () => {
+    const hass = injectedHass();
+    const pending = deferred<Response>();
+    vi.mocked(hass.fetchWithAuth!).mockReturnValueOnce(pending.promise);
+    const view = render(<MediaPanel hass={hass} />);
+    await waitFor(() => expect(hass.fetchWithAuth).toHaveBeenCalledTimes(1));
+    const replacement = injectedHass();
+    view.rerender(<MediaPanel hass={replacement} />);
+    await waitFor(() => expect(view.container.querySelector('img')).toHaveAttribute('src', 'blob:ha-artwork'));
+    await act(async () => { pending.resolve(new Response('old artwork', { headers: { 'Content-Type': 'image/png' } })); });
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
+    view.rerender(<MediaPanel hass={{ ...replacement, connection: { connected: false } }} />);
+    await waitFor(() => expect(view.container.querySelector('img')).toBeNull());
+    expect(URL.revokeObjectURL).toHaveBeenCalledExactlyOnceWith('blob:ha-artwork');
+  });
+
+  it('does not make unauthenticated thumbnail requests when the injected HA helper is unavailable', async () => {
+    const hass = injectedHass();
+    delete hass.fetchWithAuth;
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const view = render(<MediaPanel hass={hass} />);
+    expect(await screen.findByRole('img', { name: 'Artwork unavailable' })).toBeVisible();
+    expect(view.container.querySelector('img')).toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it('browses through hass and submits the unchanged reference to exactly one explicit target', async () => {

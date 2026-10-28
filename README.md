@@ -68,6 +68,14 @@ Assistant's injected `hass` browse and service APIs; provider authentication and
 media resolution remain in Home Assistant. It does not copy tokens, persist
 browser credentials, or contact the Bridge catalog or providers directly.
 
+Integration **0.2.23** fixes protected catalog artwork: images are restricted to
+validated same-origin paths and loaded through
+Home Assistant's injected authenticated-fetch helper. The panel displays
+temporary blob URLs rather than copying session credentials into image URLs;
+requests are cancelled and blob URLs released when the artwork or session
+changes. Failed, denied or invalid artwork is labelled **Artwork unavailable**
+without retrying, contacting external providers, or blocking media browsing.
+
 Config entries share serialized ownership of one panel and one temporary served
 copy of the packaged module. Unloading one entry keeps the panel available to
 other entries. Final unload or failed first-owner setup removes the panel through
