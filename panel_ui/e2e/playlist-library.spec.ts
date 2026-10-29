@@ -56,6 +56,28 @@ test('loads the local saved playlist library without playback controls', async (
   expectLocalOnly(page);
 });
 
+test('creates distinct UUIDv4 playlists when the HTTPS-only randomUUID API is absent', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(crypto, 'randomUUID', { configurable: true, value: undefined });
+  });
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.name));
+  const panel = await openLibrary(page, 'empty');
+  for (const name of ['HTTP playlist one', 'HTTP playlist two']) {
+    await panel.getByRole('button', { name: 'Create playlist', exact: true }).click();
+    await panel.getByRole('textbox', { name: 'Playlist name' }).fill(name);
+    await panel.getByRole('button', { name: 'Save playlist', exact: true }).click();
+    await expect(panel.getByText(name, { exact: true })).toBeVisible();
+  }
+  const ids = (await snapshot(page)).records.map((record: { record_id: string }) => record.record_id);
+  expect(ids).toHaveLength(2);
+  expect(new Set(ids).size).toBe(2);
+  for (const id of ids) expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  expect(errors).toEqual([]);
+  expect(await page.evaluate(() => (window as any).__playedCalls)).toEqual([]);
+  expectLocalOnly(page);
+});
+
 test('queue launch confirms replacement and submits only the saved record and target', async ({ page }) => {
   const panel = await openLibrary(page, 'queue');
   const target = panel.getByRole('combobox', { name: 'Play on' });

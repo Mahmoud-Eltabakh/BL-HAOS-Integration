@@ -6,6 +6,50 @@ import { MediaPanel, type BrowseMedia, type Hass } from './media-panel';
 afterEach(() => vi.unstubAllGlobals());
 
 describe('saved playlist library tracer', () => {
+  it('creates a stable UUIDv4 and retries a draft on HTTP without randomUUID', async () => {
+    const getRandomValues = vi.fn((bytes: Uint8Array) => {
+      bytes.fill(255);
+      return bytes;
+    });
+    vi.stubGlobal('crypto', { getRandomValues });
+    const recordId = 'ffffffff-ffff-4fff-bfff-ffffffffffff';
+    const hass: Hass = {
+      connection: { connected: true },
+      user: { id: 'local-user' },
+      states: {},
+      callWS: vi.fn<Hass['callWS']>()
+        .mockResolvedValueOnce({ revision: 0, records: [] })
+        .mockRejectedValueOnce(new Error('temporary storage failure'))
+        .mockResolvedValueOnce({
+          revision: 1,
+          records: [{ record_id: recordId, record_revision: 1, kind: 'custom', name: 'HTTP playlist', entries: [] }],
+        }),
+      callService: vi.fn(async () => undefined),
+    };
+
+    render(<MediaPanel hass={hass} />);
+    const create = screen.getByRole('button', { name: 'Create playlist' });
+    await waitFor(() => expect(create).toBeEnabled());
+    fireEvent.click(create);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Playlist name' }), { target: { value: 'HTTP playlist' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save playlist' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Your draft is still here');
+    fireEvent.click(screen.getByRole('button', { name: 'Save playlist' }));
+    expect(await screen.findByText('HTTP playlist')).toBeVisible();
+    const saves = vi.mocked(hass.callWS).mock.calls.map(([message]) => message)
+      .filter((message) => message.type === 'bl_haos/playlist_library/save_custom');
+    expect(saves).toHaveLength(2);
+    for (const save of saves) {
+      expect(save).toEqual({
+        type: 'bl_haos/playlist_library/save_custom', record_id: recordId,
+        name: 'HTTP playlist', entries: [], revision: 0,
+      });
+    }
+    expect(getRandomValues).toHaveBeenCalledTimes(1);
+    expect(getRandomValues).toHaveBeenCalledWith(expect.any(Uint8Array));
+    expect(hass.callService).not.toHaveBeenCalled();
+  });
+
   it('opens Library first and creates an empty custom playlist through HA', async () => {
     const recordId = 'c3f8941d-7e2b-4a11-8b3f-5c6d7e8f9012';
     vi.stubGlobal('crypto', { randomUUID: () => recordId });

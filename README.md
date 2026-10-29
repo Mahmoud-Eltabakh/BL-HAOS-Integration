@@ -17,11 +17,20 @@ substitution. Queue start, Next, and Previous are not automatically retried.
 
 ## Media Catalog Dashboard Card
 
-### Integration 0.2.24 local candidate
+### Integration 0.2.25: HTTP playlist creation fix
+
+Playlist creation also works when Home Assistant is accessed over local HTTP.
+If the browser's HTTPS-only `crypto.randomUUID()` API is unavailable, the card
+generates UUIDv4 record IDs using `crypto.getRandomValues()`. Draft retries keep
+the same record ID; no insecure random source or server-side ID workaround is
+used. Install integration **0.2.25**, restart Home Assistant, and reload the
+dashboard to receive the updated frontend bundle. No bridge update or
+dashboard configuration change is needed.
+
+### Integration 0.2.24: dashboard migration
 
 Integration **0.2.24** replaces the separate **BL-HAOS Media** sidebar panel with
-the full-feature `custom:bl-haos-media-card`. The local candidate is not
-published or deployed. After separately authorized installation, add it from
+the full-feature `custom:bl-haos-media-card`. After installation, add it from
 the Lovelace **Add card** picker, or use `initial_view: browse` to open the
 catalog first (the default is the playlist library). The card reuses the full
 catalog, playlist, queue, pairing, speaker, and system-settings UI and Home

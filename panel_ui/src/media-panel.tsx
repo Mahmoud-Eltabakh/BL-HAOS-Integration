@@ -78,6 +78,16 @@ function hasActiveQueue(queue?: QueueSnapshot): boolean {
   return queue?.status === 'playing' || queue?.status === 'paused' || queue?.status === 'failed';
 }
 
+function newPlaylistId(): string {
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  // randomUUID requires HTTPS, but getRandomValues also works on local HTTP HA.
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 function formatTime(seconds: unknown): string {
   if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return 'Time unavailable';
   const total = Math.floor(seconds);
@@ -549,7 +559,7 @@ export function MediaPanel({ hass, initialView = 'library' }: {
   }
 
   function startCreate() {
-    draftRecordId.current = crypto.randomUUID();
+    draftRecordId.current = newPlaylistId();
     setDraftName('');
     setDraftEntries([]);
     setDraftEntryKeys([]);
@@ -906,7 +916,7 @@ export function MediaPanel({ hass, initialView = 'library' }: {
     }
     if (!supplied?.connection.connected || !supplied.user?.id || savingDraft) return;
     const generation = sessionGeneration.current;
-    if (creating) draftRecordId.current ||= crypto.randomUUID();
+    if (creating) draftRecordId.current ||= newPlaylistId();
     setSavingDraft(true);
     setDraftError('');
     setLibraryStatus(creating ? 'Saving playlist...' : 'Saving changes...');
