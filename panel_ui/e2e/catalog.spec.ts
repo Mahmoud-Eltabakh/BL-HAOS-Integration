@@ -19,28 +19,28 @@ interface SuppliedHass {
   callWS(message: { type: string; media_content_id?: string }): Promise<Media>;
   callService(domain: string, service: string, data: Record<string, unknown>, target: { entity_id: string }): Promise<unknown>;
 }
-interface Panel extends HTMLElement {
+interface MediaCard extends HTMLElement {
   hass: SuppliedHass;
   acceptance?: { plays: number; exact: boolean; forbidden: number; settled: boolean };
 }
 
-async function openPanel(page: Page): Promise<Locator> {
-  await page.goto('/bl-haos-media', { waitUntil: 'domcontentloaded' });
-  const panel = page.locator('bl-haos-media-panel');
-  await expect(panel).toHaveCount(1);
-  await expect.poll(() => panel.evaluate((element) => {
-    const supplied = (element as Panel).hass;
+async function openCard(page: Page): Promise<Locator> {
+  await page.goto(host.dashboardPath, { waitUntil: 'domcontentloaded' });
+  const card = page.locator('bl-haos-media-card');
+  await expect(card).toHaveCount(1);
+  await expect.poll(() => card.evaluate((element) => {
+    const supplied = (element as MediaCard).hass;
     return Boolean(element.shadowRoot && supplied?.connection.connected && supplied.user?.id);
   })).toBe(true);
-  expect(await panel.evaluate((element) => (element as Panel).hass.config.version === '2026.10.3')).toBe(true);
-  await expect(panel.getByRole('heading', { name: 'Media Catalog', exact: true })).toBeVisible();
-  await expect(panel.locator('section[aria-busy]')).toHaveAttribute('aria-busy', 'false');
-  return panel;
+  expect(await card.evaluate((element) => (element as MediaCard).hass.config.version === '2026.10.3')).toBe(true);
+  await expect(card.getByRole('heading', { name: 'Media Catalog', exact: true })).toBeVisible();
+  await expect(card.locator('section[aria-busy]')).toHaveAttribute('aria-busy', 'false');
+  return card;
 }
 
 async function providerPath(panel: Locator) {
   return panel.evaluate(async (element, expected) => {
-    const supplied = (element as Panel).hass;
+    const supplied = (element as MediaCard).hass;
     const root = await supplied.callWS({ type: 'media_source/browse_media' });
     const provider = root.children?.find((item) => item.media_content_id === expected.provider && item.can_expand);
     if (!provider) throw new Error('Configured provider is not exposed at the public catalog root; layout acceptance pending');
@@ -121,13 +121,13 @@ test('actual HA hierarchy, responsive shadow-root controls and one consented opa
     if (/\/api\/(?:native|media|catalog)(?:\/|$)/.test(parsed.pathname)
       || (request.resourceType() === 'media' && parsed.origin !== host.baseURL)) forbiddenRequests++;
   });
-  let panel = await openPanel(page);
+  let panel = await openCard(page);
   const metadata = await providerPath(panel);
   for (const width of [375, 768, 1440]) {
     await page.setViewportSize({ width, height: 900 });
-    panel = await openPanel(page);
+    panel = await openCard(page);
     expect(await panel.evaluate((element, target) => {
-      const speaker = (element as Panel).hass.states[target];
+      const speaker = (element as MediaCard).hass.states[target];
       return Boolean(speaker && ['idle', 'playing', 'paused'].includes(speaker.state)
         && typeof speaker.attributes.adapter === 'string' && speaker.attributes.adapter.trim()
         && /^(?:[0-9a-f]{2}:){5}[0-9a-f]{2}$/i.test(String(speaker.attributes.bluetooth_address)));
@@ -162,7 +162,7 @@ test('actual HA hierarchy, responsive shadow-root controls and one consented opa
     await expect(panel.locator('section[aria-busy]')).toHaveAttribute('aria-busy', 'false');
   }
   await panel.evaluate((element, expected) => {
-    const current = element as Panel;
+    const current = element as MediaCard;
     const supplied = current.hass;
     const audit = { plays: 0, exact: true, forbidden: 0, settled: false };
     current.acceptance = audit;
@@ -186,7 +186,7 @@ test('actual HA hierarchy, responsive shadow-root controls and one consented opa
   }, { target: host.target, playlist: host.playlist, type: metadata.type });
   await panel.getByRole('button', { name: `Play ${metadata.title}`, exact: true }).click();
   await expect.poll(() => panel.evaluate((element) => {
-    const audit = (element as Panel).acceptance;
+    const audit = (element as MediaCard).acceptance;
     return Boolean(audit?.settled && audit.exact && audit.plays === 1 && audit.forbidden === 0);
   })).toBe(true);
   expect(pageErrors).toBe(0);
@@ -218,14 +218,14 @@ test('separately attested expired disposable fixture is rejected by HA auth with
       else if (status === 403) responses.forbidden++;
     });
     const page = await disposable.newPage();
-    await page.goto('/bl-haos-media', { waitUntil: 'domcontentloaded' });
+    await page.goto(host.dashboardPath, { waitUntil: 'domcontentloaded' });
     const observe = async () => {
       let session: { hass: { connected: boolean; user: boolean } | null; probe: 'accepted' | { code: string | number } | null } = { hass: null, probe: null };
-      const panel = page.locator('bl-haos-media-panel');
-      if (await panel.count() === 1) {
+      const card = page.locator('bl-haos-media-card');
+      if (await card.count() === 1) {
         try {
-          session = await panel.evaluate(async (element) => {
-            const supplied = (element as Panel).hass;
+          session = await card.evaluate(async (element) => {
+            const supplied = (element as MediaCard).hass;
             if (!supplied?.connection) return { hass: null, probe: null };
             let probe: 'accepted' | { code: string | number } | null = null;
             try {

@@ -41,6 +41,13 @@ export function validateHostEnvironment(env, workspace, files = filesystem) {
     || host.pathname !== '/' || host.search || host.hash || baseURL.replace(/\/$/, '') !== host.origin) {
     fail('BLHAOS_HA_URL must be a credential-free HTTP(S) origin');
   }
+  const dashboardPath = required('BLHAOS_HA_DASHBOARD_PATH');
+  let dashboard;
+  try { dashboard = new URL(dashboardPath, host.origin); } catch { fail('BLHAOS_HA_DASHBOARD_PATH must be a local dashboard path'); }
+  if (!dashboardPath.startsWith('/') || dashboardPath.startsWith('//') || /[?#\\]/.test(dashboardPath)
+    || dashboard.origin !== host.origin || dashboard.pathname !== dashboardPath) {
+    fail('BLHAOS_HA_DASHBOARD_PATH must be a local dashboard path without query or fragment');
+  }
   const external = (key) => {
     const value = required(key);
     if (!files.absolute(value)) fail(`${key} must name an absolute external file`);
@@ -71,5 +78,5 @@ export function validateHostEnvironment(env, workspace, files = filesystem) {
   if (required('BLHAOS_HA_ALLOW_PLAYBACK') !== 'I_AUTHORIZE_REAL_PLAYBACK') fail('explicit real-playback consent is required');
   if (required('BLHAOS_HA_EXPIRY_CONSENT') !== 'I_AUTHORIZE_DISPOSABLE_EXPIRY_OBSERVATION') fail('separate disposable expiry-fixture consent is required');
   if (required('BLHAOS_HA_EXPIRY_ATTESTATION') !== 'I_ATTEST_SEPARATE_DISPOSABLE_FIXTURE_IS_EXPIRED_READ_ONLY') fail('explicit expired read-only fixture attestation is required');
-  return { baseURL: host.origin, storageState, expiryStorageState, expiryAttested: true, target, provider, playlist };
+  return { baseURL: host.origin, dashboardPath, storageState, expiryStorageState, expiryAttested: true, target, provider, playlist };
 }

@@ -4,7 +4,6 @@ import * as path from 'node:path';
 
 const localOrigin = 'http://127.0.0.1:5173';
 const forbiddenRequests = new WeakMap<Page, string[]>();
-
 test.beforeEach(async ({ page }) => {
   const escaped: string[] = [];
   forbiddenRequests.set(page, escaped);
@@ -19,8 +18,10 @@ test.beforeEach(async ({ page }) => {
 });
 
 async function openLibrary(page: Page, scenario = ''): Promise<Locator> {
-  await page.goto(`/mock-harness.html${scenario ? `?scenario=${scenario}` : ''}`, { waitUntil: 'domcontentloaded' });
-  const panel = page.locator('bl-haos-media-panel');
+  const query = new URLSearchParams();
+  if (scenario) query.set('scenario', scenario);
+  await page.goto(`/mock-harness.html${query.size ? `?${query}` : ''}`, { waitUntil: 'domcontentloaded' });
+  const panel = page.locator('bl-haos-media-card');
   await expect(panel).toHaveCount(1);
   await expect.poll(() => panel.evaluate((element: any) => Boolean(
     element.shadowRoot && element.hass?.connection?.connected && element.hass?.user?.id,
@@ -171,7 +172,7 @@ test('creates, edits, keyboard-reorders, and confirms deletion without changing 
   await panel.getByRole('button', { name: 'Add media' }).click();
   await panel.getByRole('button', { name: 'Add media Sunset Horizon' }).click();
   await expect(panel.getByRole('list', { name: 'Playlist entries' }).getByRole('listitem')).toHaveCount(3);
-  await expect(panel.getByRole('button', { name: /\b(play|queue|launch)\b/i })).toHaveCount(0);
+  await expect(panel.getByRole('button', { name: 'Play playlist Quiet hours' })).toBeVisible();
 
   await panel.getByRole('textbox', { name: 'Playlist name' }).fill('Late drive');
   const entries = panel.getByRole('list', { name: 'Playlist entries' });
@@ -356,7 +357,8 @@ for (const width of [375, 768, 1440]) {
     const panel = await openLibrary(page, 'responsive');
 
     const libraryBody = panel.locator('.library-body');
-    expect(await libraryBody.evaluate((node) => node.scrollHeight > node.clientHeight)).toBe(true);
+    const libraryScrolls = await libraryBody.evaluate((node) => node.scrollHeight > node.clientHeight);
+    expect(libraryScrolls).toBe(false);
     const lastCustom = panel.getByRole('list', { name: 'Your playlists' }).getByRole('listitem').last();
     await lastCustom.scrollIntoViewIfNeeded();
     await expect(lastCustom.getByRole('button', { name: 'Edit playlist' })).toBeVisible();
@@ -382,15 +384,16 @@ for (const width of [375, 768, 1440]) {
     const catalogBody = panel.locator('.catalog-body');
     const longPickerTitle = panel.getByText(longTitle, { exact: true });
     await expect(longPickerTitle.last()).toBeVisible();
-    expect(await catalogBody.evaluate((node) => node.scrollHeight > node.clientHeight)
-      || await panel.locator('main').evaluate((node) => node.scrollHeight > node.clientHeight)).toBe(true);
+    const catalogOverflows = await catalogBody.evaluate((node) => node.scrollHeight > node.clientHeight)
+      || await panel.locator('main').evaluate((node) => node.scrollHeight > node.clientHeight);
+    expect(catalogOverflows).toBe(false);
     await longPickerTitle.last().scrollIntoViewIfNeeded();
     await expect(panel.getByRole('button', { name: `Add media ${longTitle}`, exact: true })).toBeVisible();
 
     await panel.getByRole('button', { name: 'Library', exact: true }).click();
     await panel.getByRole('button', { name: 'Stop editing' }).click();
     const providerBody = panel.locator('.provider-library-body');
-    expect(await providerBody.evaluate((node) => node.scrollHeight > node.clientHeight)).toBe(true);
+    expect(await providerBody.evaluate((node) => node.scrollHeight > node.clientHeight)).toBe(false);
     const lastProvider = panel.getByRole('list', { name: 'Saved Home Assistant playlists' }).getByRole('listitem').last();
     await lastProvider.scrollIntoViewIfNeeded();
     const providerTitle = lastProvider.locator('.provider-title');
@@ -427,7 +430,7 @@ for (const width of [375, 768, 1440]) {
       }),
     }));
     expect(dialogMetrics.scrollable).toBe(true);
-    expect(dialogMetrics.hasVerticalOverflow).toBe(true);
+    expect(dialogMetrics.hasVerticalOverflow).toBe(width === 375);
     expect(dialogMetrics.noHorizontalOverflow).toBe(true);
     expect(dialogMetrics.targetsAtLeast44px).toBe(true);
     await dialog.evaluate((node) => { node.scrollTop = node.scrollHeight; });

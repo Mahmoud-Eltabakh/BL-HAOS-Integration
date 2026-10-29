@@ -2,9 +2,9 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import * as path from 'path';
 import * as fs from 'fs';
 
-async function openMockPanel(page: Page): Promise<Locator> {
+async function openMockCard(page: Page): Promise<Locator> {
   await page.goto('/mock-harness.html', { waitUntil: 'domcontentloaded' });
-  const panel = page.locator('bl-haos-media-panel');
+  const panel = page.locator('bl-haos-media-card');
   await expect(panel).toHaveCount(1);
 
   // Poll until shadow root and internal state are ready
@@ -21,9 +21,9 @@ async function openMockPanel(page: Page): Promise<Locator> {
   return panel;
 }
 
-test.describe('Mock-HA Media Catalog Panel', () => {
+test.describe('Mock-HA Media Catalog Card', () => {
   test('browses catalog, selects connected speaker, and dispatches playback', async ({ page }) => {
-    const panel = await openMockPanel(page);
+    const panel = await openMockCard(page);
 
     // Verify Heading
     const heading = panel.locator('h1, h2').first();
@@ -71,7 +71,7 @@ test.describe('Mock-HA Media Catalog Panel', () => {
   for (const width of [375, 768, 1440]) {
     test(`renders responsively with no overlap or clipping at ${width}px`, async ({ page }) => {
       await page.setViewportSize({ width, height: 900 });
-      const panel = await openMockPanel(page);
+      const panel = await openMockCard(page);
 
       // Audit Layout constraints
       const metrics = await panel.evaluate((element: any) => {
@@ -80,6 +80,7 @@ test.describe('Mock-HA Media Catalog Panel', () => {
 
         const main = shadow.querySelector('main') || shadow.firstElementChild;
         const selector = shadow.querySelector('select');
+        const styles = shadow.querySelector('style')?.textContent ?? '';
         const controls = Array.from(shadow.querySelectorAll('button, select, input, a')) as HTMLElement[];
         const visibleControls = controls.filter(c => c.getClientRects().length > 0);
         const rects = visibleControls.map(c => c.getBoundingClientRect());
@@ -106,6 +107,12 @@ test.describe('Mock-HA Media Catalog Panel', () => {
           hitAreas,
           noOverflow,
           noOverlap: !hasOverlap,
+          cardSizing: (
+            element.classList.contains('card-layout')
+            && main?.classList.contains('card-layout') === true
+            && styles.includes(':host(.card-layout) { height:auto; min-height:0; overflow:visible; }')
+            && styles.includes('.neu-page.card-layout { height:auto; min-height:0; overflow:visible; }')
+          ),
           controlCount: visibleControls.length
         };
       });
@@ -114,6 +121,7 @@ test.describe('Mock-HA Media Catalog Panel', () => {
       expect(metrics.noOverflow).toBe(true);
       expect(metrics.noOverlap).toBe(true);
       expect(metrics.hitAreas).toBe(true);
+      expect(metrics.cardSizing).toBe(true);
 
       // Ensure directory exists for screenshots
       const resultsDir = path.resolve(process.cwd(), 'test-results', 'ha-catalog');
@@ -130,7 +138,7 @@ test.describe('Mock-HA Media Catalog Panel', () => {
   }
 
   test('expands and returns with keyboard focus restoration', async ({ page }) => {
-    const panel = await openMockPanel(page);
+    const panel = await openMockCard(page);
 
     // Select a target using the native keyboard control.
     const selector = panel.locator('select#target-speaker-select, select').first();

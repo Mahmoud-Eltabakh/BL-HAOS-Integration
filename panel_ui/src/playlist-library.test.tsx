@@ -457,7 +457,7 @@ describe('custom playlist editor', () => {
     expect(await screen.findByText('Fresh session draft')).toBeVisible();
   });
 
-  it('allows the close link to navigate when the editor draft is clean', async () => {
+  it('allows a clean draft to be discarded without a retired panel link', async () => {
     const hass: Hass = {
       connection: { connected: true }, user: { id: 'local-user' }, states: {},
       callWS: vi.fn<Hass['callWS']>(async () => ({ revision: 0, records: [] } as unknown as BrowseMedia)),
@@ -467,11 +467,9 @@ describe('custom playlist editor', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Create playlist' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: 'Create playlist' }));
 
-    const closeLink = screen.getByRole('link', { name: 'Close catalog' });
-    const closeEvent = new MouseEvent('click', { bubbles: true, cancelable: true });
-    act(() => { closeLink.dispatchEvent(closeEvent); });
-
-    expect(closeEvent.defaultPrevented).toBe(false);
+    expect(screen.queryByRole('link', { name: 'Close catalog' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Discard draft' }));
+    expect(screen.queryByRole('dialog', { name: 'Discard changes' })).not.toBeInTheDocument();
     expect(screen.queryByRole('textbox', { name: 'Playlist name' })).not.toBeInTheDocument();
   });
 

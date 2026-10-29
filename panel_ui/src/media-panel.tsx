@@ -215,7 +215,10 @@ const accessError = 'Your Home Assistant session cannot access this media source
 const unsupported = 'This source cannot play audio on a BL-HAOS speaker. Choose an audio item or provider playlist.';
 interface BrowseRequest { item?: BrowseMedia; path: BrowseMedia[]; query?: string }
 
-export function MediaPanel({ hass, initialView = 'library' }: { hass?: Hass; initialView?: 'library' | 'browse' }) {
+export function MediaPanel({ hass, initialView = 'library' }: {
+  hass?: Hass;
+  initialView?: 'library' | 'browse';
+}) {
   const initialViewRef = useRef(initialView);
   const [view, setView] = useState<'library' | 'browse'>(initialView);
   const [panelTab, setPanelTab] = useState<'media' | 'speakers'>('media');
@@ -291,8 +294,7 @@ export function MediaPanel({ hass, initialView = 'library' }: { hass?: Hass; ini
   const keepEditingButton = useRef<HTMLButtonElement>(null);
   const keepCurrentQueueButton = useRef<HTMLButtonElement>(null);
   const browseMediaButton = useRef<HTMLButtonElement>(null);
-  const dialogTrigger = useRef<HTMLButtonElement | HTMLAnchorElement | null>(null);
-  const closeAfterDiscard = useRef(false);
+  const dialogTrigger = useRef<HTMLButtonElement | null>(null);
   const originalDraft = useRef<{ name: string; entries: PlaylistEntry[] }>({ name: '', entries: [] });
   const addMediaButton = useRef<HTMLButtonElement>(null);
   const request = useRef(0);
@@ -300,7 +302,6 @@ export function MediaPanel({ hass, initialView = 'library' }: { hass?: Hass; ini
   const sessionGeneration = useRef(0);
   const draftRecordId = useRef('');
   const entryKeyCounter = useRef(0);
-  const navigateAfterDiscard = useRef(false);
   const providerSaveInFlight = useRef(new Set<string>());
   const availabilityInFlight = useRef(new Set<string>());
   const playRequest = useRef(0);
@@ -479,12 +480,6 @@ export function MediaPanel({ hass, initialView = 'library' }: { hass?: Hass; ini
   }, [confirmDelete, confirmProviderRemove, confirmDiscard, confirmQueueLaunch]);
 
   useLayoutEffect(() => {
-    if (!navigateAfterDiscard.current || confirmDiscard || creating || editingRecord) return;
-    navigateAfterDiscard.current = false;
-    if (dialogTrigger.current?.isConnected) dialogTrigger.current.click();
-  }, [confirmDiscard, creating, editingRecord]);
-
-  useLayoutEffect(() => {
     if (confirmQueueLaunch) keepCurrentQueueButton.current?.focus();
     else if (confirmDelete) keepPlaylistButton.current?.focus();
     else if (confirmProviderRemove) keepShortcutButton.current?.focus();
@@ -601,9 +596,8 @@ export function MediaPanel({ hass, initialView = 'library' }: { hass?: Hass; ini
       || JSON.stringify(draftEntries) !== JSON.stringify(originalDraft.current.entries);
   }
 
-  function requestEditorExit(trigger: HTMLButtonElement | HTMLAnchorElement, closingPanel = false) {
+  function requestEditorExit(trigger: HTMLButtonElement) {
     dialogTrigger.current = trigger;
-    closeAfterDiscard.current = closingPanel;
     if (isDraftDirty()) {
       setConfirmDiscard(true);
       return;
@@ -1061,7 +1055,7 @@ export function MediaPanel({ hass, initialView = 'library' }: { hass?: Hass; ini
     }
   }
 
-  return <main className="neu-page" onKeyDown={(event) => {
+  return <main className="neu-page card-layout" onKeyDown={(event) => {
     if (view === 'browse' && event.key === 'Escape' && ancestors.length && !pending) { event.preventDefault(); back(); }
   }}>
     <header className="catalog-header">
@@ -1089,17 +1083,6 @@ export function MediaPanel({ hass, initialView = 'library' }: { hass?: Hass; ini
         {target && <span className="selected-target" title={targetAvailable && selected ? entityName(selected) : targetLabel}>
           {targetAvailable && selected ? entityName(selected) : targetLabel}</span>}
       </div>
-      <a className="neu-button icon-button close-catalog" href="/" aria-label="Close catalog" title="Close catalog"
-        onClick={(event) => {
-          if (creating || editingRecord) {
-            if (isDraftDirty()) {
-              event.preventDefault();
-              requestEditorExit(event.currentTarget, true);
-            } else {
-              finishEditing();
-            }
-          }
-        }}><X size={20} aria-hidden="true" /></a>
     </header>
     <nav className="view-toggle" aria-label="Media views">
       <button className="neu-button" type="button" ref={libraryViewButton} aria-pressed={panelTab === 'media' && view === 'library'} onClick={() => {
@@ -1400,13 +1383,10 @@ export function MediaPanel({ hass, initialView = 'library' }: { hass?: Hass; ini
       <h2 id="discard-changes-heading">Discard changes</h2>
       <p>Discard unsaved changes to “{editingRecord?.name || draftName || 'this playlist'}”? The saved playlist will remain unchanged.</p>
       <div className="row-actions">
-        <button className="neu-button" type="button" ref={keepEditingButton} onClick={() => { closeAfterDiscard.current = false; setConfirmDiscard(false); }}>Keep editing</button>
+        <button className="neu-button" type="button" ref={keepEditingButton} onClick={() => setConfirmDiscard(false)}>Keep editing</button>
         <button className="neu-button destructive-button" type="button" onClick={() => {
-          const closePanel = closeAfterDiscard.current;
-          closeAfterDiscard.current = false;
           setConfirmDiscard(false);
           finishEditing();
-          navigateAfterDiscard.current = closePanel;
         }}>Discard changes</button>
       </div>
     </dialog>}
@@ -1432,12 +1412,13 @@ const styles = `
   --neu-page:#151a23; --neu-surface:#242d3b; --neu-raised:#313d4f; --neu-deep:#0f141c;
   --neu-text:#eef2f7; --neu-muted:#b6c2d2; --neu-border:rgba(148,163,184,.18);
   font-family:ui-sans-serif,sans-serif; font-size:14px; color:var(--neu-text); letter-spacing:0; }
+:host(.card-layout) { height:auto; min-height:0; overflow:visible; }
 * { box-sizing:border-box; }
 .neu-page { height:100dvh; min-height:0; padding:24px; background:var(--neu-page); display:flex; flex-direction:column; gap:16px; overflow-y:auto; }
+.neu-page.card-layout { height:auto; min-height:0; overflow:visible; }
 .catalog-header { display:flex; align-items:center; justify-content:space-between; gap:24px; }
 .catalog-heading { display:flex; align-items:center; gap:16px; min-width:0; }
 .catalog-header > * { min-width:0; }
-.close-catalog { text-decoration:none; align-self:center; }
 .selected-target { font-size:16px; font-weight:600; line-height:1.2; overflow-wrap:anywhere; color:#93c5fd; }
 .catalog-path { display:flex; flex-wrap:wrap; align-items:center; gap:8px; min-width:0; overflow-wrap:anywhere; }
 .view-toggle { display:flex; gap:8px; }
@@ -1468,6 +1449,7 @@ const styles = `
 .primary-button { background:#3b82f6; border-color:#3b82f6; color:#fff; }
 .destructive-button { color:#fda4af; }
 .confirmation-dialog { width:min(560px,calc(100vw - 48px)); max-height:calc(100dvh - 48px); overflow:auto; padding:24px; color:var(--neu-text); background:var(--neu-surface); border:1px solid var(--neu-border); border-radius:8px; box-shadow:0 20px 60px rgba(0,0,0,.55); }
+.neu-page.card-layout .confirmation-dialog { max-height:min(90vh,640px); }
 .confirmation-dialog::backdrop { background:rgba(0,0,0,.72); }
 .confirmation-dialog h2 { padding:0 0 16px; border:0; }
 .confirmation-dialog p { line-height:1.5; overflow-wrap:anywhere; }
@@ -1502,16 +1484,16 @@ li:last-child { border-bottom:0; }
 :focus-visible { outline:2px solid #67e8f9; outline-offset:2px; }
 @media(min-width:768px) { .neu-page { padding:40px; } }
 @media(max-width:640px) { .catalog-header { align-items:stretch; flex-direction:column; } .target-control { width:100%; }
-  .close-catalog { align-self:flex-start; }
   li { grid-template-columns:48px minmax(0,1fr); gap:8px 16px; } .row-actions { grid-column:2; flex-wrap:wrap; }
   .playlist-entries li { grid-template-columns:40px minmax(0,1fr); } .playlist-entries .entry-actions { grid-column:2; } }
 @media(prefers-reduced-motion:reduce) { * { transition:none !important; } }
 `;
 
-export class MediaPanelElement extends HTMLElement {
+class MediaSurfaceElement extends HTMLElement {
   private suppliedHass?: Hass;
   private root?: Root;
   private mount: HTMLDivElement;
+  protected initialView: 'library' | 'browse' = 'library';
 
   constructor() {
     super();
@@ -1529,19 +1511,86 @@ export class MediaPanelElement extends HTMLElement {
 
   get hass(): Hass | undefined { return this.suppliedHass; }
 
-  connectedCallback() {
+  connectedCallback(): void {
+    this.classList.add('card-layout');
+    if (this.root) return;
     this.root = createRoot(this.mount);
     this.render();
   }
 
-  disconnectedCallback() {
+  disconnectedCallback(): void {
     this.root?.unmount();
     this.root = undefined;
   }
 
-  private render() { this.root?.render(<MediaPanel hass={this.suppliedHass} />); }
+  protected render(): void {
+    this.root?.render(<MediaPanel hass={this.suppliedHass} initialView={this.initialView} />);
+  }
 }
 
-if (!customElements.get('bl-haos-media-panel')) {
-  customElements.define('bl-haos-media-panel', MediaPanelElement);
+export interface MediaCardConfig {
+  type: 'custom:bl-haos-media-card';
+  initial_view?: 'library' | 'browse';
+}
+
+export class MediaCardElement extends MediaSurfaceElement {
+  private config?: MediaCardConfig;
+
+  constructor() { super(); }
+
+  setConfig(config: unknown): void {
+    if (!config || typeof config !== 'object' || Array.isArray(config)) {
+      throw new Error('BL-HAOS Media card configuration must be an object');
+    }
+    const candidate = config as Record<string, unknown>;
+    if (candidate.type !== 'custom:bl-haos-media-card') {
+      throw new Error('BL-HAOS Media card type must be custom:bl-haos-media-card');
+    }
+    if (candidate.initial_view !== undefined && candidate.initial_view !== 'library' && candidate.initial_view !== 'browse') {
+      throw new Error('BL-HAOS Media card initial_view must be "library" or "browse"');
+    }
+    this.config = {
+      type: 'custom:bl-haos-media-card',
+      initial_view: candidate.initial_view as 'library' | 'browse' | undefined,
+    };
+    this.initialView = this.config.initial_view ?? 'library';
+    this.render();
+  }
+
+  getCardSize(): number { return 8; }
+
+  getGridOptions(): { columns: 12; min_columns: 6; rows: 'auto' } {
+    return { columns: 12, min_columns: 6, rows: 'auto' };
+  }
+
+  static getStubConfig(): Record<string, never> { return {}; }
+}
+
+if (!customElements.get('bl-haos-media-card')) {
+  customElements.define('bl-haos-media-card', MediaCardElement);
+}
+
+declare global {
+  interface Window {
+    customCards?: Array<{
+      type: string;
+      name: string;
+      description: string;
+      preview: boolean;
+      documentationURL: string;
+    }>;
+  }
+}
+
+if (typeof window !== 'undefined') {
+  const cards = window.customCards ?? (window.customCards = []);
+  if (!cards.some((card) => card.type === 'bl-haos-media-card')) {
+    cards.push({
+      type: 'bl-haos-media-card',
+      name: 'BL-HAOS Media',
+      description: 'Browse media, manage playlists, and control connected BL-HAOS speakers.',
+      preview: false,
+      documentationURL: 'https://github.com/Mahmoud-Eltabakh/BL-HAOS/blob/main/modules/integration/README.md',
+    });
+  }
 }

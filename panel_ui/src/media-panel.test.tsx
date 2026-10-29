@@ -3,7 +3,7 @@ import '@testing-library/jest-dom/vitest';
 import userEvent from '@testing-library/user-event';
 import { cloneElement, type ReactElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { MediaPanel, type BrowseMedia, type Hass, type MediaPanelElement } from './media-panel';
+import { MediaCardElement, MediaPanel, type BrowseMedia, type Hass } from './media-panel';
 
 type PanelProps = { hass?: Hass; initialView?: 'library' | 'browse' };
 
@@ -72,7 +72,8 @@ afterEach(() => {
 
 describe('injected Home Assistant tracer', () => {
   it('has 44px controls, constrained scrolling, two-line titles and reduced-motion styles', async () => {
-    const panel = document.createElement('bl-haos-media-panel') as MediaPanelElement;
+    const panel = document.createElement('bl-haos-media-card') as MediaCardElement;
+    panel.setConfig({ type: 'custom:bl-haos-media-card' });
     await act(async () => { document.body.append(panel); panel.hass = injectedHass(); });
     const style = panel.shadowRoot!.querySelector('style')!.textContent!;
     expect(style).toContain('min-height:44px');
@@ -245,21 +246,19 @@ describe('injected Home Assistant tracer', () => {
     expect(screen.getByRole('button', { name: 'Open Provider' })).toHaveFocus();
   });
 
-  it('navigates through the Close link only after confirming discard', async () => {
+  it('confirms discarding an unsaved draft without exposing retired panel navigation', async () => {
     const hass = injectedHass();
     renderRTL(<MediaPanel hass={hass} initialView="library" />);
     await screen.findByRole('heading', { name: 'Your playlists' });
     fireEvent.click(screen.getByRole('button', { name: 'Create playlist' }));
     fireEvent.change(screen.getByRole('textbox', { name: 'Playlist name' }), { target: { value: 'Unsaved draft' } });
 
-    const closeLink = screen.getByRole('link', { name: 'Close catalog' });
-    const navigate = vi.spyOn(closeLink, 'click').mockImplementation(() => {});
-    fireEvent.click(closeLink);
+    expect(screen.queryByRole('link', { name: 'Close catalog' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Discard draft' }));
     const dialog = screen.getByRole('dialog', { name: 'Discard changes' });
-    expect(navigate).not.toHaveBeenCalled();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Discard changes' }));
 
-    await waitFor(() => expect(navigate).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Playlist name' })).not.toBeInTheDocument());
   });
 
   it('keeps unavailable target and item labels and disables manual retry without substitution', async () => {
@@ -686,7 +685,8 @@ describe('injected Home Assistant tracer', () => {
   });
 
   it('accepts only the custom element hass property, including delayed injection and reconnection', async () => {
-    const panel = document.createElement('bl-haos-media-panel') as MediaPanelElement;
+    const panel = document.createElement('bl-haos-media-card') as MediaCardElement;
+    panel.setConfig({ type: 'custom:bl-haos-media-card' });
     await act(async () => { document.body.append(panel); });
     const hass = injectedHass();
     await act(async () => { panel.hass = hass; });

@@ -10,6 +10,7 @@ import SafeReporter, { SCENARIO_IDS } from './safe-reporter.mjs';
 const workspace = '/workspace';
 const input = {
   BLHAOS_HA_URL: 'https://ha.example',
+  BLHAOS_HA_DASHBOARD_PATH: '/lovelace/0',
   BLHAOS_HA_STORAGE_STATE: '/external/disposable.json',
   BLHAOS_HA_TARGET: 'media_player.explicit_speaker',
   BLHAOS_HA_PROVIDER_ID: 'media-source://opaque/provider',
@@ -31,6 +32,7 @@ const files = {
 test('accepts explicit external disposable fixtures without reading their contents', () => {
   const result = validateHostEnvironment(input, workspace, files);
   assert.equal(result.baseURL, input.BLHAOS_HA_URL);
+  assert.equal(result.dashboardPath, input.BLHAOS_HA_DASHBOARD_PATH);
   assert.equal(result.target, input.BLHAOS_HA_TARGET);
   assert.equal(result.playlist, input.BLHAOS_HA_PLAYLIST_ID);
 });
@@ -46,6 +48,12 @@ for (const key of Object.keys(input)) {
 for (const value of ['https://user:secret@ha.example', 'https://ha.example/?token=secret', 'https://ha.example/path', 'https://ha.example/#secret', 'file:///external']) {
   test('rejects a non-origin or credential-bearing host without reflecting input', () => {
     assert.throws(() => validateHostEnvironment({ ...input, BLHAOS_HA_URL: value }, workspace, files), (error) => !error.message.includes('secret') && error.message.startsWith('Host prerequisites:'));
+  });
+
+  test('requires a local dashboard path without a query, fragment, or external origin', () => {
+    for (const value of ['lovelace/0', '//external.example/lovelace/0', '/lovelace/0?token=secret', '/lovelace/0#view', '/\\external.example']) {
+      assert.throws(() => validateHostEnvironment({ ...input, BLHAOS_HA_DASHBOARD_PATH: value }, workspace, files), /Host prerequisites:/);
+    }
   });
 }
 
@@ -142,7 +150,7 @@ test('every spec scenario title is allowlisted exactly once', () => {
 });
 
 const quiet = { accepted: 0, unauthorized: 0, forbidden: 0, tokenRejected: 0 };
-const observe = (changes = {}) => ({ attested: true, pathname: '/bl-haos-media', hass: null, probe: null, ...changes, responses: { ...quiet, ...changes.responses } });
+const observe = (changes = {}) => ({ attested: true, pathname: '/lovelace/0', hass: null, probe: null, ...changes, responses: { ...quiet, ...changes.responses } });
 
 test('numeric connection loss alone is never expiry', () => {
   assert.equal(classifyExpiryEvidence(observe({ hass: { connected: false, user: true }, probe: { code: 3 } })), 'disconnected');
@@ -180,7 +188,7 @@ test('permission denial is never proved expiry', () => {
 });
 
 test('missing hass off the exact public login path stays pending', () => {
-  for (const pathname of ['/', '/bl-haos-media', '/auth/authorize/extra', '/AUTH/AUTHORIZE', undefined]) {
+  for (const pathname of ['/', '/lovelace/0', '/auth/authorize/extra', '/AUTH/AUTHORIZE', undefined]) {
     assert.equal(classifyExpiryEvidence(observe({ pathname })), 'pending');
   }
 });

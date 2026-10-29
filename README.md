@@ -15,14 +15,47 @@ queue start to the selected connected speaker. Resolution and queue failures
 produce bounded errors without URL/credential details, fallback, or target
 substitution. Queue start, Next, and Previous are not automatically retried.
 
-## Media Catalog Panel
+## Media Catalog Dashboard Card
+
+### Integration 0.2.24 local candidate
+
+Integration **0.2.24** replaces the separate **BL-HAOS Media** sidebar panel with
+the full-feature `custom:bl-haos-media-card`. The local candidate is not
+published or deployed. After separately authorized installation, add it from
+the Lovelace **Add card** picker, or use `initial_view: browse` to open the
+catalog first (the default is the playlist library). The card reuses the full
+catalog, playlist, queue, pairing, speaker, and system-settings UI and Home
+Assistant's injected `hass` APIs; it does not copy credentials or call the
+bridge catalog directly.
+
+The integration loads its versioned frontend module through Home Assistant's
+`frontend.add_extra_js_url` owner lifecycle. Dashboard placement is a deliberate
+user action; the integration does not create Lovelace resources or mutate any
+dashboard. YAML dashboards normally need no `resources:` entry. If a custom
+frontend configuration disables Home Assistant's extra-module URL support, the
+manual fallback is:
+
+```yaml
+lovelace:
+  resources:
+    - url: /api/bl_haos/catalog/bl-haos-media-panel.js?v=0.2.24
+      type: module
+```
+
+Do not also add this resource when automatic module loading is enabled. After
+upgrade and Home Assistant restart, `/bl-haos-media` is no longer registered;
+update bookmarks, dashboard navigation links, and the old add-on **Open Media
+Catalog** destination to the dashboard view where you place the card. The
+dashboard itself is never rewritten by the integration.
 
 ### Phase 24 Local Workflow and Limits
 
-The production panel and integrated bridge 0.2.69 remain undeployed; local
+The Phase 24 catalog candidate with integrated bridge 0.2.69 is historical and
+undeployed; local
 Core 2026.10.3 tests are not live-provider, expiry or physical-playback proof.
 After separately authorized installation, use **Native Browse Media** on the
-speaker or **Open Media Catalog** in the Home Assistant-native media panel. In **Play on**, select exactly one connected BL-HAOS speaker, browse
+speaker or add `custom:bl-haos-media-card` to the confirmed dashboard view. In
+**Play on**, select exactly one connected BL-HAOS speaker, browse
 the provider hierarchy and press **Play** for an audio item or provider playlist.
 The original opaque reference goes unchanged to native `media_player.play_media`;
 HA owns provider authentication and reference resolution. A playlist stays one
@@ -30,14 +63,14 @@ reference, not a local queue. Only explicit same-item/same-target retry is
 offered after failure, never automatic retry, fallback, skip or target substitution.
 Search appears only when HA advertises it.
 
-The panel does not store browser/add-on HA/provider credentials, proxy a bridge
+The card does not store browser/add-on HA/provider credentials, proxy a bridge
 catalog, contact providers directly, or accept raw URL input. Existing native
 direct-URL support is separate, not a catalog fallback. Public provider layout
 and actual expiry remain unverified.
 
 ### Phase 25 Local Candidate
 
-The local Phase 25 candidate uses the authenticated panel and Home Assistant-owned
+The local Phase 25 candidate uses the authenticated card and Home Assistant-owned
 storage for custom playlists of ordered Home Assistant media references and
 one-reference provider-playlist shortcuts; provider tracks are not copied.
 Availability checks are explicit HA media-source browse requests for the exact
@@ -48,7 +81,8 @@ IDs.
 
 The local Phase 26 candidate resolves every saved reference in Home Assistant
 before one queue start. The bridge owns one in-memory queue per speaker; the
-Library panel and native entity consume the bridge's authoritative snapshot. Native queue controls require bridge queue version 1.
+Library card and native entity consume the bridge's authoritative snapshot.
+Native queue controls require bridge queue version 1.
 Resolved playback URLs are transient between Home Assistant and the bridge and
 are never sent to the browser or stored in the playlist library. Failed items
 remain current until an explicit Play retry or Next skip; the integration does
@@ -60,29 +94,30 @@ acceptance. Phase 24 production requirements remain pending, T-24-15 remains
 OPEN/HIGH, and T-24-16 remains OPEN/MEDIUM. Release and deployment are not
 approved. Follow root TESTING.md for separately authorized HAOS acceptance.
 
-Successful integration setup registers **BL-HAOS Media** at `/bl-haos-media`.
 The packaged `panel_static/bl-haos-media-panel.js` module is served at
-`/api/bl_haos/catalog/bl-haos-media-panel.js`. Select one connected speaker in
-**Play on** before playing a media-source item. The panel uses only Home
-Assistant's injected `hass` browse and service APIs; provider authentication and
-media resolution remain in Home Assistant. It does not copy tokens, persist
-browser credentials, or contact the Bridge catalog or providers directly.
+`/api/bl_haos/catalog/bl-haos-media-panel.js` with the installed integration
+version in its cache-busting URL. Select one connected speaker in **Play on**
+before playing a media-source item. The card uses only Home Assistant's
+injected `hass` browse and service APIs; provider authentication and media
+resolution remain in Home Assistant. It does not copy tokens, persist browser
+credentials, or contact the Bridge catalog or providers directly.
 
-Integration **0.2.23** fixes protected catalog artwork: images are restricted to
+Integration **0.2.23** introduced protected catalog artwork: images are restricted to
 validated same-origin paths and loaded through
-Home Assistant's injected authenticated-fetch helper. The panel displays
+Home Assistant's injected authenticated-fetch helper. The card displays
 temporary blob URLs rather than copying session credentials into image URLs;
 requests are cancelled and blob URLs released when the artwork or session
 changes. Failed, denied or invalid artwork is labelled **Artwork unavailable**
 without retrying, contacting external providers, or blocking media browsing.
 
-Config entries share serialized ownership of one panel and one temporary served
-copy of the packaged module. Unloading one entry keeps the panel available to
-other entries. Final unload or failed first-owner setup removes the panel through
-the public frontend API and deletes the temporary copy, making the module URL
-return HTTP 404. Core 2026.10.3 has no public static-path unregister API: its inert
+Config entries share serialized ownership of one extra-module URL and one
+temporary served copy of the packaged module. Unloading one entry keeps the
+module available to other entries. Final unload or failed first-owner setup
+removes the extra-module URL and temporary copy, making the module URL return
+HTTP 404. Core 2026.10.3 has no public static-path unregister API: its inert
 route remains until Core exits, and later setup recreates the same file and
 reuses that route. This is serving disablement, not full route unregistration.
+The shared extra-module URL is removed only after the final owner unloads.
 An indeterminate static-registration failure stays fail-closed for the current
 Core lifetime rather than attempting duplicate registration; setup then reports
 that a Core restart is required. No restart is performed automatically.
@@ -102,7 +137,7 @@ HA-shell acceptance still require the phase 24 target-host checks.
 The integration derives the add-on's private hostname from Supervisor discovery, validates `GET /api/native/identity`, then reads `GET /api/native/speakers` and listens on `/ws/native` for updates. The Bridge add-on pushes its native token and configured `log_level` through the same Supervisor discovery message, so discovered integration logging stays synchronized with the add-on without changing Home Assistant's global logger. Existing entries refresh these values and reload themselves when the add-on rotates its token or changes log level. A manual local endpoint and token entry are available only as a fallback; manually configured entries default to `info`.
 
 
-## Headless bridge migration and compatibility
+## Phase 38 historical headless bridge migration and compatibility
 
 Bridge 0.2.71 and integration 0.2.22 are local, undeployed candidates. The old
 add-on Ingress application and legacy management routes are retired; the native

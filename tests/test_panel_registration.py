@@ -20,7 +20,7 @@ from homeassistant.setup import async_setup_component
 from homeassistant.exceptions import ConfigEntryNotReady
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.bl_haos import _PANEL_DATA, _finish_operation, async_setup_entry, async_unload_entry
+from custom_components.bl_haos import FRONTEND_MODULE_URL, _MODULE_DATA, _finish_operation, async_setup_entry, async_unload_entry
 from custom_components.bl_haos.const import DOMAIN
 
 
@@ -32,21 +32,10 @@ def test_sil_runtime_matches_target_core_release() -> None:
     assert version("homeassistant") == TARGET_CORE_VERSION
 
 
-async def test_panel_custom_accepts_module_url(hass) -> None:
-    await panel_custom.async_register_panel(
-        hass,
-        frontend_url_path="bl-haos-media",
-        webcomponent_name="bl-haos-media-panel",
-        module_url=PANEL_URL,
-        sidebar_title="BL-HAOS Media",
-        sidebar_icon="mdi:play-box-multiple",
-    )
-
-
 async def test_http_accepts_integration_static_path(hass, tmp_path: Path) -> None:
     assert await async_setup_component(hass, HTTP_DOMAIN, {})
     bundle = tmp_path / "bl-haos-media-panel.js"
-    bundle.write_text("customElements.define('bl-haos-media-panel', class {});", encoding="utf-8")
+    bundle.write_text("customElements.define('bl-haos-media-card', class {});", encoding="utf-8")
     static_path = StaticPathConfig(
         "/api/bl_haos/catalog",
         str(tmp_path),
@@ -59,6 +48,7 @@ async def test_http_accepts_integration_static_path(hass, tmp_path: Path) -> Non
 @pytest.fixture
 async def panel_environment(hass, hass_client, enable_custom_integrations):
     assert await async_setup_component(hass, HTTP_DOMAIN, {})
+    hass.data[frontend.DATA_EXTRA_MODULE_URL] = frontend.UrlManager(lambda *_: None, [])
     with (
         patch("custom_components.bl_haos.BLHAOSClient") as client_class,
         patch.object(hass.config_entries, "async_forward_entry_setups", new_callable=AsyncMock) as forward,
@@ -79,7 +69,7 @@ async def assert_module_status(http, status):
     assert response.status == status
     if status == 200:
         body = await response.text()
-        assert "bl-haos-media-panel" in body
+        assert "bl-haos-media-card" in body
         assert "Play playlist" in body
         assert "Playback queue" in body
         assert "max-age=2678400" not in response.headers.get("Cache-Control", "")
@@ -92,17 +82,19 @@ async def test_owned_panel_http_unload_and_reload(hass, panel_environment):
         assert await async_setup_entry(hass, entry)
         http = await http()
         await assert_module_status(http, 200)
-        panel = hass.data[frontend.DATA_PANELS]["bl-haos-media"]
-        assert panel.config["_panel_custom"]["module_url"] == PANEL_URL
-        assert panel.config["_panel_custom"]["name"] == "bl-haos-media-panel"
+        assert FRONTEND_MODULE_URL in hass.data[frontend.DATA_EXTRA_MODULE_URL].urls
+        assert "bl-haos-media" not in hass.data.get(frontend.DATA_PANELS, {})
         assert await async_unload_entry(hass, entry)
         await assert_module_status(http, 404)
-        assert "bl-haos-media" not in hass.data[frontend.DATA_PANELS]
+        assert FRONTEND_MODULE_URL not in hass.data[frontend.DATA_EXTRA_MODULE_URL].urls
+        assert "bl-haos-media" not in hass.data.get(frontend.DATA_PANELS, {})
         assert await async_setup_entry(hass, entry)
         await assert_module_status(http, 200)
+        assert FRONTEND_MODULE_URL in hass.data[frontend.DATA_EXTRA_MODULE_URL].urls
         assert register.call_count == 1
         assert await async_unload_entry(hass, entry)
         await assert_module_status(http, 404)
+        assert FRONTEND_MODULE_URL not in hass.data[frontend.DATA_EXTRA_MODULE_URL].urls
 
 
 async def test_owned_panel_serializes_multiple_entries(hass, panel_environment):
@@ -114,9 +106,11 @@ async def test_owned_panel_serializes_multiple_entries(hass, panel_environment):
         assert register.call_count == 1
         assert await async_unload_entry(hass, first)
         await assert_module_status(http, 200)
-        assert "bl-haos-media" in hass.data[frontend.DATA_PANELS]
+        assert FRONTEND_MODULE_URL in hass.data[frontend.DATA_EXTRA_MODULE_URL].urls
+        assert "bl-haos-media" not in hass.data.get(frontend.DATA_PANELS, {})
         assert await async_unload_entry(hass, second)
         await assert_module_status(http, 404)
+        assert FRONTEND_MODULE_URL not in hass.data[frontend.DATA_EXTRA_MODULE_URL].urls
 
 
 @pytest.mark.parametrize("failure", [RuntimeError("platform failure"), asyncio.CancelledError()])
@@ -132,19 +126,39 @@ async def test_owned_panel_platform_failure_closes_resources(hass, panel_environ
     await assert_module_status(await http(), 404)
 
 
-async def test_owned_panel_registration_failure_is_inert_and_reloadable(hass, panel_environment):
+async def test_owned_module_setup_does_not_register_sidebar_panel(hass, panel_environment):
     http_factory, _, _, _ = panel_environment
     entry = panel_entry(hass)
-    with patch.object(panel_custom, "async_register_panel", side_effect=RuntimeError("registration failed")):
-        with pytest.raises(RuntimeError, match="registration failed"):
+    with patch.object(panel_custom, "async_register_panel", wraps=panel_custom.async_register_panel) as register_panel:
+        assert await async_setup_entry(hass, entry)
+        register_panel.assert_not_awaited()
+        assert "bl-haos-media" not in hass.data.get(frontend.DATA_PANELS, {})
+        assert await async_unload_entry(hass, entry)
+    http = await http_factory()
+    assert FRONTEND_MODULE_URL not in hass.data[frontend.DATA_EXTRA_MODULE_URL].urls
+    await assert_module_status(http, 404)
+
+
+async def test_owned_extra_module_registration_failure_rolls_back(hass, panel_environment):
+    http_factory, _, _, _ = panel_environment
+    entry = panel_entry(hass)
+    original_add = frontend.add_extra_js_url
+
+    def add_then_fail(target_hass, url):
+        original_add(target_hass, url)
+        raise RuntimeError("extra module failed")
+
+    with (
+        patch.object(frontend, "add_extra_js_url", side_effect=add_then_fail),
+        patch.object(frontend, "remove_extra_js_url", wraps=frontend.remove_extra_js_url) as remove,
+    ):
+        with pytest.raises(RuntimeError, match="extra module failed"):
             await async_setup_entry(hass, entry)
     entry.runtime_data.client.async_close.assert_awaited_once()
+    remove.assert_called_once_with(hass, FRONTEND_MODULE_URL)
+    assert FRONTEND_MODULE_URL not in hass.data[frontend.DATA_EXTRA_MODULE_URL].urls
     http = await http_factory()
     await assert_module_status(http, 404)
-    assert "bl-haos-media" not in hass.data.get(frontend.DATA_PANELS, {})
-    assert await async_setup_entry(hass, entry)
-    await assert_module_status(http, 200)
-    assert await async_unload_entry(hass, entry)
 
 
 async def test_owned_panel_failed_second_entry_preserves_first(hass, panel_environment):
@@ -156,7 +170,7 @@ async def test_owned_panel_failed_second_entry_preserves_first(hass, panel_envir
     with pytest.raises(RuntimeError):
         await async_setup_entry(hass, second)
     await assert_module_status(http, 200)
-    assert "bl-haos-media" in hass.data[frontend.DATA_PANELS]
+    assert "bl-haos-media" not in hass.data.get(frontend.DATA_PANELS, {})
     assert await async_unload_entry(hass, first)
     await assert_module_status(http, 404)
 
@@ -188,21 +202,6 @@ async def test_owned_panel_initialization_failure_remains_not_ready(hass, panel_
     await assert_module_status(await http_factory(), 404)
 
 
-async def test_owned_panel_partial_public_registration_failure_removes_panel(hass, panel_environment):
-    http_factory, _, _, _ = panel_environment
-    register = panel_custom.async_register_panel
-
-    async def register_then_fail(*args, **kwargs):
-        await register(*args, **kwargs)
-        raise RuntimeError("after public registration")
-
-    with patch.object(panel_custom, "async_register_panel", side_effect=register_then_fail):
-        with pytest.raises(RuntimeError, match="after public registration"):
-            await async_setup_entry(hass, panel_entry(hass))
-    assert "bl-haos-media" not in hass.data.get(frontend.DATA_PANELS, {})
-    await assert_module_status(await http_factory(), 404)
-
-
 async def test_owned_panel_partial_static_failure_never_duplicates_route(hass, panel_environment):
     http_factory, _, _, _ = panel_environment
     register = hass.http.async_register_static_paths
@@ -223,24 +222,20 @@ async def test_owned_panel_partial_static_failure_never_duplicates_route(hass, p
     await assert_module_status(http, 404)
 
 
-@pytest.mark.parametrize("late_failure", [False, True])
 @pytest.mark.parametrize("cancellations", [1, 2, 3])
-async def test_owned_panel_actual_cancellation_waits_for_registration_then_cleans(hass, panel_environment, cancellations, late_failure):
+async def test_owned_module_actual_cancellation_waits_for_static_registration_then_cleans(hass, panel_environment, cancellations):
     http_factory, _, forward, _ = panel_environment
     started, proceed = asyncio.Event(), asyncio.Event()
-    register = panel_custom.async_register_panel
+    register = hass.http.async_register_static_paths
 
-    async def delayed_register(*args, **kwargs):
+    async def delayed_register(configs):
         started.set()
         await proceed.wait()
-        await register(*args, **kwargs)
-        if late_failure:
-            raise RuntimeError("late registration failure after public mutation")
+        await register(configs)
 
     entry = panel_entry(hass)
     with (
-        patch.object(panel_custom, "async_register_panel", side_effect=delayed_register),
-        patch.object(hass.http, "async_register_static_paths", wraps=hass.http.async_register_static_paths) as static_register,
+        patch.object(hass.http, "async_register_static_paths", side_effect=delayed_register) as static_register,
     ):
         setup = asyncio.create_task(async_setup_entry(hass, entry))
         await started.wait()
@@ -249,17 +244,18 @@ async def test_owned_panel_actual_cancellation_waits_for_registration_then_clean
             checkpoint = asyncio.Event()
             asyncio.get_running_loop().call_soon(checkpoint.set)
             await checkpoint.wait()
-        lock_held = hass.data[_PANEL_DATA].lock.locked()
+        lock_held = hass.data[_MODULE_DATA].lock.locked()
         still_pending = not setup.done()
         proceed.set()
         with pytest.raises(asyncio.CancelledError):
             await setup
-    panel = hass.data[_PANEL_DATA]
+    module = hass.data[_MODULE_DATA]
     assert lock_held
     assert still_pending
-    assert not panel.lock.locked()
-    assert not panel.owners
-    assert not panel.served_path.exists()
+    assert not module.lock.locked()
+    assert not module.owners
+    assert not module.served_path.exists()
+    assert not module.extra_js_registered
     forward.assert_not_awaited()
     entry.runtime_data.client.async_close.assert_awaited_once()
     assert "bl-haos-media" not in hass.data.get(frontend.DATA_PANELS, {})
@@ -271,7 +267,7 @@ async def test_owned_panel_actual_cancellation_waits_for_registration_then_clean
         assert static_register.call_count == 1
         reload_register.assert_not_called()
         assert await async_unload_entry(hass, entry)
-    assert not panel.owners
+    assert not module.owners
     await assert_module_status(http, 404)
 
 
@@ -282,7 +278,7 @@ async def test_owned_panel_repeated_cancellation_drains_executor_before_unlock(h
     assert await async_setup_entry(hass, entry)
     http = await http_factory()
     await assert_module_status(http, 200)
-    panel = hass.data[_PANEL_DATA]
+    module = hass.data[_MODULE_DATA]
     if operation == "copy":
         assert await async_unload_entry(hass, entry)
         await assert_module_status(http, 404)
@@ -291,7 +287,7 @@ async def test_owned_panel_repeated_cancellation_drains_executor_before_unlock(h
     started, finished = asyncio.Event(), asyncio.Event()
     proceed = threading.Event()
     loop = asyncio.get_running_loop()
-    method = panel._copy_bundle if operation == "copy" else panel._remove_bundle
+    method = module._copy_bundle if operation == "copy" else module._remove_bundle
     executor = hass.async_add_executor_job
     executor_waits = []
 
@@ -320,7 +316,7 @@ async def test_owned_panel_repeated_cancellation_drains_executor_before_unlock(h
     task = None
     try:
         with (
-            patch.object(panel, method_name, new=gated_file_operation),
+            patch.object(module, method_name, new=gated_file_operation),
             patch.object(hass, "async_add_executor_job", side_effect=observe_executor),
         ):
             task = asyncio.create_task(
@@ -330,7 +326,7 @@ async def test_owned_panel_repeated_cancellation_drains_executor_before_unlock(h
             await cancel_and_checkpoint(task)
             await cancel_and_checkpoint(task)
             wait_cancelled = executor_waits[0].cancelled()
-            lock_held = panel.lock.locked()
+            lock_held = module.lock.locked()
             still_pending = not task.done()
             proceed.set()
             await asyncio.wait_for(finished.wait(), timeout=5)
@@ -339,9 +335,9 @@ async def test_owned_panel_repeated_cancellation_drains_executor_before_unlock(h
         assert not wait_cancelled, "outer cancellation cancelled the real Core executor wait"
         assert lock_held, "shared ownership lock released while file work was pending"
         assert still_pending, "caller returned before pending file work settled"
-        assert not panel.owners
-        assert not panel.panel_registered
-        assert not panel.served_path.exists()
+        assert not module.owners
+        assert not module.extra_js_registered
+        assert not module.served_path.exists()
         assert "bl-haos-media" not in hass.data.get(frontend.DATA_PANELS, {})
         entry.runtime_data.client.async_close.assert_awaited_once()
         if operation == "copy":
@@ -352,13 +348,13 @@ async def test_owned_panel_repeated_cancellation_drains_executor_before_unlock(h
         assert await async_setup_entry(hass, entry)
         await assert_module_status(http, 200)
         assert await async_unload_entry(hass, entry)
-        assert not panel.owners
+        assert not module.owners
         await assert_module_status(http, 404)
     finally:
         proceed.set()
         if task is not None:
             await asyncio.gather(task, return_exceptions=True)
-        await panel.release(hass, entry.entry_id)
+        await module.release(hass, entry.entry_id)
 
 
 @pytest.mark.parametrize("cancellations", [0, 1, 2, 3])

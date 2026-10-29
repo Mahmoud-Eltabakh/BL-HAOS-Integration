@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, patch
 
 import aiohttp
 import pytest
+from homeassistant.components import frontend
 from homeassistant import config_entries
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
@@ -36,6 +37,7 @@ def _patch_session(session: FakeSession):
 
 
 async def _setup_entry(hass, session: FakeSession) -> MockConfigEntry:
+    hass.data.setdefault(frontend.DATA_EXTRA_MODULE_URL, frontend.UrlManager(lambda *_: None, []))
     entry = MockConfigEntry(
         domain=DOMAIN,
         data={CONF_ENDPOINT: ENDPOINT, CONF_TOKEN: TOKEN},

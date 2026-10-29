@@ -9,6 +9,7 @@
     "test:host-config": "node --test e2e/host-env.test.mjs",
     "test:host": "playwright test --config e2e/playwright.config.ts",
     "test:mock-panel": "playwright test --config playwright.mock.config.ts",
+    "test:mock-card": "playwright test --config playwright.card.config.ts",
     "typecheck:host": "tsc --noEmit --strict --skipLibCheck --target ES2022 --module ESNext --moduleResolution bundler --allowJs e2e/playwright.config.ts e2e/catalog.spec.ts",
     "dev": "vite --host 127.0.0.1"
   },

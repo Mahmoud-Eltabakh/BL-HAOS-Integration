@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BL-HAOS Media Panel Mock Shell</title>
+  <title>BL-HAOS Media Card Mock Shell</title>
   <style>
     body {
       margin: 0;
@@ -12,11 +12,18 @@
       color: #f8fafc;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
+    #app.dashboard-cell {
+      max-width: 1120px;
+      margin: 16px auto;
+      padding: 16px;
+      background: #0b1220;
+      border: 1px solid #334155;
+    }
   </style>
 </head>
 <body>
-  <div id="app">
-    <bl-haos-media-panel id="panel"></bl-haos-media-panel>
+  <div id="app" class="dashboard-cell">
+    <bl-haos-media-card id="panel"></bl-haos-media-card>
   </div>
   <script type="module">
     import '/src/media-panel.tsx';
@@ -433,8 +440,8 @@
       if (queue?.status === 'playing') speaker.state = 'playing';
       else if (queue?.status === 'paused') speaker.state = 'paused';
       else if (speaker.state !== 'off') speaker.state = 'idle';
-      const panel = document.getElementById('panel');
-      if (panel) panel.hass = mockHass;
+      const card = document.getElementById('panel');
+      if (card) card.hass = mockHass;
     }
 
     const mockQueue = {
@@ -503,12 +510,10 @@
     window.__mockLibrary = mockLibraryControls;
     window.__mockQueue = mockQueue;
 
-    customElements.whenDefined('bl-haos-media-panel').then(() => {
-      const panel = document.getElementById('panel');
-      if (panel) {
-        panel.hass = mockHass;
-      }
-    });
+    const card = document.getElementById('panel');
+    if (!card || typeof card.setConfig !== 'function') throw new Error('BL-HAOS Media card is not registered');
+    card.setConfig({ type: 'custom:bl-haos-media-card' });
+    card.hass = mockHass;
   </script>
 </body>
 </html>

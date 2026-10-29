@@ -29,7 +29,7 @@ FORBIDDEN_PHASE_24_DOC_CLAIMS = (
 def test_phase24_required_documentation_claims():
     repo = ROOT.parents[1]
     for relative, fragments in REQUIRED_PHASE_24_DOC_CLAIMS.items():
-        text = (repo / relative).read_text(encoding="utf-8")
+        text = " ".join((repo / relative).read_text(encoding="utf-8").split())
         for fragment in fragments:
             assert fragment in text, f"{relative}: missing Phase 24 claim: {fragment}"
 
@@ -78,7 +78,7 @@ def test_hacs_component_layout_and_manifest():
     manifest = json.loads((COMPONENT / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["domain"] == "bl_haos"
     assert manifest["config_flow"] is True
-    assert manifest["version"] == "0.2.23"
+    assert manifest["version"] == "0.2.24"
 
 
 def test_native_transport_is_discovery_based_and_mqtt_free():
@@ -209,7 +209,12 @@ def test_panel_build_source_and_stable_bundle_contract():
     assert bundle.is_file()
     assert {path.name for path in bundle.parent.iterdir()} == {bundle.name}
     compiled = bundle.read_text(encoding="utf-8")
-    assert "bl-haos-media-panel" in compiled
+    assert "bl-haos-media-card" in compiled
+    assert "custom:bl-haos-media-card" in compiled
+    assert not re.search(r"customElements\.define\(\s*['\"]bl-haos-media-panel", compiled)
+    assert "bl-haos-media-panel" not in compiled
+    assert "customCards" in compiled
+    assert "getGridOptions" in compiled
     assert "--neu-page" in compiled
     assert "Play playlist" in compiled
     assert "Playback queue" in compiled
@@ -229,8 +234,10 @@ def test_panel_build_source_and_stable_bundle_contract():
         assert marker in source
     for marker in management_markers:
         assert marker in source + management_source
-    for forbidden in ("localStorage", "sessionStorage", "resolve_media", "apiClient", "window.", "parent.", "fetch(", "Authorization", "Bearer "):
+    for forbidden in ("localStorage", "sessionStorage", "resolve_media", "apiClient", "parent.", "fetch(", "Authorization", "Bearer "):
         assert forbidden not in source
+    assert "window.customCards" in source
+    assert "fetch(" not in source
 
 
 def test_panel_bundle_matches_fresh_build():
@@ -266,6 +273,11 @@ def test_panel_bundle_matches_fresh_build():
         fresh_bundle = build_dir / bundle.name
         fresh_compiled = fresh_bundle.read_text(encoding="utf-8")
         assert "Play playlist" in fresh_compiled
+        assert "bl-haos-media-card" in fresh_compiled
+        assert "custom:bl-haos-media-card" in fresh_compiled
+        assert not re.search(r"customElements\.define\(\s*['\"]bl-haos-media-panel", fresh_compiled)
+        assert "bl-haos-media-panel" not in fresh_compiled
+        assert "customCards" in fresh_compiled
         assert "Playback queue" in fresh_compiled
         for marker in ("Create playlist", "Save changes", "Browse media"):
             assert marker in fresh_compiled
