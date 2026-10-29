@@ -17,6 +17,14 @@ substitution. Queue start, Next, and Previous are not automatically retried.
 
 ## Media Catalog Dashboard Card
 
+The Phase 38.2 frontend candidate inherits Home Assistant's light or dark theme colors and adapts its
+rows and controls to the Lovelace card width, including narrow dashboard cells.
+Library, Browse, Speakers and the existing speaker/settings controls keep the
+same Home Assistant actions and session ownership.
+This UI polish is locally/mock verified and approved for source publication
+only; it is not deployed. The installed 0.2.25 release is unchanged. A future
+versioned release and separately approved installation are needed to receive it.
+
 ### Integration 0.2.25: HTTP playlist creation fix
 
 Playlist creation also works when Home Assistant is accessed over local HTTP.

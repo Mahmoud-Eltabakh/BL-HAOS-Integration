@@ -91,10 +91,12 @@ describe('Lovelace media card contract', () => {
     expect(card.shadowRoot?.querySelector('[aria-label="Close catalog"]')).toBeNull();
 
     const styles = card.shadowRoot?.querySelector('style')?.textContent ?? '';
-    expect(styles).toContain(':host(.card-layout) { height:auto; min-height:0; overflow:visible; }');
-    expect(styles).toContain('.neu-page.card-layout { height:auto; min-height:0; overflow:visible; }');
+    expect(styles).toContain(':host { display:block; width:100%; min-width:0; height:auto; container-type:inline-size;');
+    expect(styles).toContain('.neu-page { width:100%; min-width:0; max-width:none; min-height:0;');
+    expect(styles).toContain('@container (max-width:640px)');
+    expect(styles).not.toContain('height:100dvh');
+    expect(styles).not.toContain('max-width:480px');
     expect(styles).toContain('.neu-page.card-layout .confirmation-dialog { max-height:min(90vh,640px); }');
-    expect(styles).not.toContain('.neu-page.card-layout { height:100dvh');
     expect(card.shadowRoot?.querySelector('iframe')).toBeNull();
 
     await act(async () => { card.remove(); });

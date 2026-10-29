@@ -79,13 +79,24 @@ describe('injected Home Assistant tracer', () => {
     expect(style).toContain('min-height:44px');
     expect(style).toMatch(/\.catalog-path button\s*\{[^}]*min-width:44px/);
     expect(style).toMatch(/\.catalog-body\s*\{[^}]*overflow-y:auto/);
-    expect(style).toMatch(/\.neu-surface\s*\{[^}]*min-height:160px/);
+    expect(style).toMatch(/--neu-surface:var\(--ha-card-background/);
+    expect(style).toMatch(/--neu-text:var\(--primary-text-color/);
+    expect(style).toMatch(/--neu-error:var\(--error-color/);
+    expect(style).toMatch(/--neu-success:var\(--success-color/);
+    expect(style).toContain('container-type:inline-size');
+    expect(style).toContain('@container (max-width:640px)');
+    expect(style).not.toContain('color-scheme:dark');
+    expect(style).not.toContain('height:100dvh');
+    expect(style).not.toContain('max-width:480px');
+    expect(style).toMatch(/\.neu-surface\s*\{[^}]*border-radius:16px/);
     expect(style).toContain('-webkit-line-clamp:2');
     expect(style).toContain(':focus-visible');
     expect(style).toContain('transition:background-color 150ms');
     expect(style).toContain('@media(prefers-reduced-motion:reduce)');
     expect(style).toContain('transition:none !important');
     expect(style).toMatch(/\.selected-target\s*\{[^}]*overflow-wrap:anywhere/);
+    expect(style).toContain('input[type="checkbox"] { width:44px; height:44px;');
+    expect(style).toContain('.speaker-management > .neu-surface { display:grid;');
     await act(async () => { panel.remove(); });
   });
 

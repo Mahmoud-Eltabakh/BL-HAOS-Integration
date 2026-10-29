@@ -5,19 +5,56 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>BL-HAOS Media Card Mock Shell</title>
   <style>
+    :root {
+      color-scheme: light;
+      --primary-background-color: #f5f7fa;
+      --ha-card-background: #fff;
+      --card-background-color: #fff;
+      --secondary-background-color: #edf1f5;
+      --primary-text-color: #202a35;
+      --secondary-text-color: #536273;
+      --divider-color: #d7dee7;
+      --primary-color: #1769aa;
+      --error-color: #b3261e;
+      --warning-color: #8a4b08;
+      --success-color: #176b42;
+      --disabled-text-color: #687584;
+      --input-fill-color: #f6f8fa;
+      --text-primary-color: #fff;
+      font-family: Roboto, "Noto", sans-serif;
+    }
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      --primary-background-color: #111820;
+      --ha-card-background: #1c2732;
+      --card-background-color: #1c2732;
+      --secondary-background-color: #273543;
+      --primary-text-color: #e7edf3;
+      --secondary-text-color: #b4c1ce;
+      --divider-color: #40505e;
+      --primary-color: #8ab4f8;
+      --error-color: #ffb4ab;
+      --warning-color: #f6c177;
+      --success-color: #8bd5a8;
+      --disabled-text-color: #a0acb8;
+      --input-fill-color: #17212b;
+      --text-primary-color: #101820;
+    }
     body {
       margin: 0;
-      padding: 0;
-      background-color: #0f172a;
-      color: #f8fafc;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      padding: 16px;
+      background: var(--primary-background-color);
+      color: var(--primary-text-color);
+      font-family: Roboto, "Noto", sans-serif;
     }
     #app.dashboard-cell {
-      max-width: 1120px;
-      margin: 16px auto;
-      padding: 16px;
-      background: #0b1220;
-      border: 1px solid #334155;
+      width: var(--mock-card-width, 100%);
+      max-width: 100%;
+      margin: 0 auto;
+      padding: 0;
+      background: var(--ha-card-background);
+      border: 1px solid var(--divider-color);
+      box-sizing: border-box;
     }
   </style>
 </head>
@@ -27,6 +64,14 @@
   </div>
   <script type="module">
     import '/src/media-panel.tsx';
+
+    const params = new URLSearchParams(location.search);
+    const requestedTheme = params.get('theme') === 'dark' ? 'dark' : 'light';
+    const requestedWidth = Number(params.get('card'));
+    document.documentElement.dataset.theme = requestedTheme;
+    if ([320, 480, 720].includes(requestedWidth)) {
+      document.documentElement.style.setProperty('--mock-card-width', `${requestedWidth}px`);
+    }
 
     const mockRoot = {
       title: 'Media sources',
@@ -221,6 +266,9 @@
       records: structuredClone(initialRecords),
     };
     const mockFailures = [];
+    if (requestedScenario === 'library-error') {
+      mockFailures.push({ type: 'bl_haos/playlist_library/list', message: 'Mock library error', afterCommit: false });
+    }
     const mockCalls = [];
     const queueItems = {};
     const resolvedTitles = [];
@@ -408,6 +456,24 @@
       },
       async callWS(message) {
         mockCalls.push(structuredClone(message));
+        if (message.type === 'bl_haos/speakers/devices') {
+          return [
+            { address: '11:22:33:44:55:66', name: 'Living Room Speaker', paired: true, trusted: true, connected: true, is_audio_sink: true, adapter: 'hci0' },
+            { address: 'aa:bb:cc:dd:ee:ff', name: 'Kitchen Speaker', paired: true, trusted: true, connected: true, is_audio_sink: true, adapter: 'hci0' },
+          ];
+        }
+        if (message.type === 'bl_haos/speakers/settings/get') {
+          return {
+            speakers: {
+              '11:22:33:44:55:66': { custom_alias: 'Living Room', auto_reconnect: true, preferred_adapter: 'hci0', default_volume: 40, codec_override: null },
+              'aa:bb:cc:dd:ee:ff': { custom_alias: 'Kitchen', auto_reconnect: true, preferred_adapter: 'hci0', default_volume: 35, codec_override: null },
+            },
+            log_level: 'info',
+            default_codec: 'auto',
+            auto_reconnect_enabled: true,
+          };
+        }
+        if (message.type === 'bl_haos/speakers/adapters/list') return [{ interface: 'hci0', powered: true }];
         if (message.type === 'media_source/browse_media') {
           maybeFail(message.type, false);
           if (!message.media_content_id || message.media_content_id === 'media-source://') {
@@ -512,7 +578,7 @@
 
     const card = document.getElementById('panel');
     if (!card || typeof card.setConfig !== 'function') throw new Error('BL-HAOS Media card is not registered');
-    card.setConfig({ type: 'custom:bl-haos-media-card' });
+    card.setConfig({ type: 'custom:bl-haos-media-card', initial_view: params.get('area') === 'browse' ? 'browse' : 'library' });
     card.hass = mockHass;
   </script>
 </body>
