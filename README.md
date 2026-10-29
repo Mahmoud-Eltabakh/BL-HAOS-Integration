@@ -17,6 +17,16 @@ substitution. Queue start, Next, and Previous are not automatically retried.
 
 ## Media Catalog Dashboard Card
 
+### Integration 0.2.27: theme-accent contrast
+
+Primary actions and selected navigation
+use readable theme foregrounds with accent borders instead of relying on
+white text over a potentially bright theme accent. Regression coverage includes
+the host's cyan accent in both light and dark themes.
+
+Install integration **0.2.27**, restart Home Assistant, and reload the dashboard
+to receive this correction. No bridge or dashboard configuration change is needed.
+
 ### Integration 0.2.26: HA-native card styling
 
 The card inherits Home Assistant's light or dark theme colors and adapts its

@@ -4,6 +4,28 @@ import * as fs from 'fs';
 
 type MockArea = 'library' | 'browse' | 'speakers' | 'settings';
 
+for (const theme of ['light', 'dark'] as const) {
+  test(`bright HA cyan retains primary-action and active-navigation contrast in ${theme}`, async ({ page }) => {
+    const panel = await openMockCard(page, { area: 'library', theme, cardWidth: 480 });
+    await page.evaluate(() => {
+      document.documentElement.style.setProperty('--primary-color', '#009ac7');
+      document.documentElement.style.setProperty('--text-primary-color', '#ffffff');
+    });
+    await expect.poll(async () => {
+      const colors = await panel.evaluate((element) => {
+        const root = element.shadowRoot!;
+        return [...root.querySelectorAll('.primary-button:not(:disabled),.view-toggle [aria-pressed="true"]')]
+          .map((node) => {
+            const style = getComputedStyle(node);
+            return { foreground: style.color, background: style.backgroundColor };
+          });
+      });
+      return colors.length >= 2 && colors.every(({ foreground, background }) =>
+        contrastRatio(foreground, background) >= 4.5);
+    }).toBe(true);
+  });
+}
+
 function contrastRatio(foreground: string, background: string): number {
   const luminance = (color: string) => {
     const channels = color.match(/[\d.]+/g)?.slice(-3).map(Number);

@@ -7098,13 +7098,13 @@ const pf = `
 .catalog-header { display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; }
 .catalog-heading { display:flex; align-items:center; gap:12px; min-width:0; }
 .catalog-header > * { min-width:0; }
-.selected-target { font-size:16px; font-weight:600; line-height:1.3; overflow-wrap:anywhere; color:var(--neu-accent); }
+.selected-target { font-size:16px; font-weight:600; line-height:1.3; overflow-wrap:anywhere; color:var(--neu-text); }
 .catalog-path { display:flex; flex-wrap:wrap; align-items:center; gap:8px; min-width:0; overflow-wrap:anywhere; }
 .view-toggle { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,112px),1fr)); gap:8px; width:100%; }
 .view-toggle > button { min-width:0; }
-.view-toggle [aria-pressed="true"] { color:var(--neu-accent); border-color:var(--neu-accent); }
+.view-toggle [aria-pressed="true"] { color:var(--neu-text); border-color:var(--neu-accent); font-weight:600; }
 .catalog-path button { min-width:44px; max-width:100%; overflow-wrap:anywhere; text-align:left; }
-.catalog-path [aria-current] { color:var(--neu-accent); }
+.catalog-path [aria-current] { color:var(--neu-text); font-weight:600; }
 .catalog-search { display:flex; align-items:end; flex-wrap:wrap; gap:8px; padding:16px; }
 .search-control { display:grid; gap:8px; flex:1; min-width:0; }
 .catalog-body { min-height:0; overflow-y:auto; overscroll-behavior:contain; }
@@ -7126,7 +7126,7 @@ const pf = `
 .provider-rename-form { display:grid; gap:8px; width:100%; }
 .provider-actions { flex-wrap:wrap; }
 .media-title.provider-title { display:block; overflow:visible; overflow-wrap:anywhere; -webkit-line-clamp:unset; -webkit-box-orient:unset; }
-.neu-button.primary-button { background:var(--neu-accent); border-color:var(--neu-accent); color:var(--text-primary-color,#fff); }
+.neu-button.primary-button { background:var(--neu-surface); border:2px solid var(--neu-accent); color:var(--neu-text); font-weight:600; }
 .destructive-button { color:var(--neu-error); }
 .confirmation-dialog { width:min(560px,calc(100% - 32px)); max-height:calc(100vh - 32px); overflow:auto;
   padding:24px; color:var(--neu-text); background:var(--neu-surface); border:1px solid var(--neu-border);
