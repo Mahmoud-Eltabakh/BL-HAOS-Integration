@@ -78,7 +78,7 @@ def test_hacs_component_layout_and_manifest():
     manifest = json.loads((COMPONENT / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["domain"] == "bl_haos"
     assert manifest["config_flow"] is True
-    assert manifest["version"] == "0.2.25"
+    assert manifest["version"] == "0.2.26"
 
 
 def test_native_transport_is_discovery_based_and_mqtt_free():

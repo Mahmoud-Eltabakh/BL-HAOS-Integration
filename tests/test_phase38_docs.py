@@ -13,7 +13,7 @@ BRIDGE_DOCS = Path(__file__).resolve().parents[3] / "modules" / "bridge" / "DOCS
 
 def test_phase38_manifest_compatibility_and_documentation_matrix():
     manifest = json.loads((COMPONENT / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["version"] == "0.2.25"
+    assert manifest["version"] == "0.2.26"
     assert MINIMUM_ADDON_VERSION == "0.2.70"
     assert evaluate_identity({"bridge_id": "bl_haos_native_bridge", "version": 1, "addon_version": "0.2.71", "min_integration_version": "0.2.22"}, manifest["version"]).status == "compatible"
     docs = " ".join(README.read_text(encoding="utf-8").lower().replace("**", "").split())
@@ -32,7 +32,7 @@ def test_current_integration_docs_do_not_claim_retired_ingress_controls():
 
 def test_installed_integration_version_is_still_manifest_driven():
     manifest = json.loads((COMPONENT / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["version"] == "0.2.25"
+    assert manifest["version"] == "0.2.26"
 
 
 def test_phase38_1_dashboard_card_release_and_migration_docs():

@@ -61,4 +61,4 @@ def test_protocol_is_strict_and_queue_version_is_not_a_product_version():
 async def test_installed_integration_version_comes_from_its_manifest():
     from types import SimpleNamespace
 
-    assert await get_installed_integration_version(SimpleNamespace()) == "0.2.25"
+    assert await get_installed_integration_version(SimpleNamespace()) == "0.2.26"
